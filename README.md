@@ -2,6 +2,14 @@
 
 A cross-platform, feature-rich REPL (Read-Eval-Print Loop) library for Zig.
 
+## Status
+
+| Aspect | Info |
+|--------|------|
+| API Stability | Beta |
+| Zig Version | 0.14.0+ |
+| Platforms | Linux, macOS, Windows |
+
 ## Features
 
 - **Raw terminal mode** with proper cleanup on exit/signals
