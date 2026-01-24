@@ -7,20 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-01-24
+
 ### Added
 - Merge request template for consistent contribution workflow
 - Issue templates for bug reports, feature requests, and questions
-
-### Changed
-- Updated CI catalog components to v1.7.1
-
-### Security
-- Added GitLab native Secret Detection
-- Enabled Advanced SAST and Dependency Scanning
-
-## [0.1.0] - 2025-12-30
-
-### Added
 - Initial REPL library implementation with cross-platform support (Linux, macOS, Windows)
 - Raw terminal mode with proper cleanup on exit/signals
 - Emacs keybindings with runtime mode switching
@@ -63,7 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation including README, Architecture, Contributing guide, and Roadmap
 
 ### Changed
+- Updated CI catalog components to v1.7.1
 - Licensed under Apache-2.0 for open source release
+
+### Security
+- Added GitLab native Secret Detection
+- Enabled Advanced SAST and Dependency Scanning
 
 ### Infrastructure
 - CI/CD pipeline using DevNW CI Catalog components
