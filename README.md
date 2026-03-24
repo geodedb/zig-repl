@@ -348,11 +348,11 @@ Development is tracked through GitLab issues organized into milestones:
 
 | Priority | Issue | Description |
 |----------|-------|-------------|
-| High | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1) | Set up CI/CD pipeline |
 | High | [#2](https://gitlab.com/devnw/zig/repl/-/issues/2) | Add comprehensive unit tests |
 | High | [#12](https://gitlab.com/devnw/zig/repl/-/issues/12) | Add Unicode and wide character support |
-| High | [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) | Improve Windows terminal support |
 | High | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) | Write API documentation |
+| Medium | [#10](https://gitlab.com/devnw/zig/repl/-/issues/10) | Add syntax highlighting support |
+| Medium | [#3](https://gitlab.com/devnw/zig/repl/-/issues/3) | Add integration tests |
 
 ### Milestones
 
@@ -370,9 +370,9 @@ Contributions are welcome! Please see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.m
 
 Key areas where help is needed:
 - [#3](https://gitlab.com/devnw/zig/repl/-/issues/3) - Integration tests
+- [#10](https://gitlab.com/devnw/zig/repl/-/issues/10) - Syntax highlighting
 - [#12](https://gitlab.com/devnw/zig/repl/-/issues/12) - Unicode support
-- [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) - Windows testing
-- [#21](https://gitlab.com/devnw/zig/repl/-/issues/21) - Usage examples
+- [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) - API documentation
 
 ## Documentation
 

@@ -10,7 +10,6 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 const text_utils = @import("text_utils.zig");
-const history_mod = @import("history.zig");
 const core = @import("core.zig");
 
 const appendHistoryFiltered = text_utils.appendHistoryFiltered;

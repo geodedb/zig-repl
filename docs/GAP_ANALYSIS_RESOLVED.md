@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 11 -- GAP-0047 resolved, all 47 gaps closed)
+**Last updated:** 2026-03-24 (Phase 13 -- GAP-0048..GAP-0051 resolved, 51 of 52 gaps closed)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -59,6 +59,10 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0045 | Delete key triggers undo in Emacs mode | 2026-03-24 | [#102](https://gitlab.com/devnw/zig/repl/-/issues/102) (closed) |
 | GAP-0046 | Delete key dead in Vi insert mode | 2026-03-24 | [#103](https://gitlab.com/devnw/zig/repl/-/issues/103) (closed) |
 | GAP-0047 | config.zig missing from ARCHITECTURE.md | 2026-03-24 | -- (doc gap) |
+| GAP-0048 | ROADMAP.md issue #15 status stale | 2026-03-24 | [#107](https://gitlab.com/devnw/zig/repl/-/issues/107) (closed) |
+| GAP-0049 | CONTRIBUTING.md docs/ tree incomplete | 2026-03-24 | [#108](https://gitlab.com/devnw/zig/repl/-/issues/108) (closed) |
+| GAP-0050 | README "Current Priorities" lists closed issues #1 and #15 | 2026-03-24 | [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed) |
+| GAP-0051 | README Contributing section lists closed issues #15 and #21 | 2026-03-24 | [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed) |
 
 ---
 
@@ -444,8 +448,40 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Evidence:** `docs/ARCHITECTURE.md` -- config.zig box in diagram, Key Components section with 6 bullet points. 257/257 tests pass.
 - **Resolved date:** 2026-03-24
 
+### GAP-0048: ROADMAP.md Issue #15 Status Stale [RESOLVED]
+
+- **Issue:** [#107](https://gitlab.com/devnw/zig/repl/-/issues/107) (closed)
+- **Category:** Docs
+- **Resolution:** Updated `docs/ROADMAP.md` issue #15 status from "Open" to "Closed".
+- **Evidence:** `docs/ROADMAP.md` -- issue #15 row shows "Closed" status.
+- **Resolved date:** 2026-03-24
+
+### GAP-0049: CONTRIBUTING.md docs/ Tree Incomplete [RESOLVED]
+
+- **Issue:** [#108](https://gitlab.com/devnw/zig/repl/-/issues/108) (closed)
+- **Category:** Docs
+- **Resolution:** Added all 5 missing gap analysis files to the `docs/` section of the project structure tree in `docs/CONTRIBUTING.md`: GAP_ANALYSIS.md, GAP_ANALYSIS_RESOLVED.md, PERF_GAP_ANALYSIS.md, QUALITY_GAP_ANALYSIS.md, SECURITY_GAP_ANALYSIS.md.
+- **Evidence:** `docs/CONTRIBUTING.md` -- docs/ section now lists all 8 files under docs/.
+- **Resolved date:** 2026-03-24
+
+### GAP-0050: README "Current Priorities" Lists Closed Issues #1 and #15 [RESOLVED]
+
+- **Issue:** [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed, combined with GAP-0051)
+- **Category:** Docs
+- **Resolution:** Removed closed issues #1, #15, and #21 from README.md "Current Priorities" and "Contributing" sections. Replaced with currently open issues.
+- **Evidence:** `README.md` -- all issues listed in Current Priorities table are open in GitLab.
+- **Resolved date:** 2026-03-24
+
+### GAP-0051: README Contributing Section Lists Closed Issues #15 and #21 [RESOLVED]
+
+- **Issue:** [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed, combined with GAP-0050)
+- **Category:** Docs
+- **Resolution:** Removed closed issues #15 and #21 from README Contributing help-needed section. Replaced with currently open issues.
+- **Evidence:** `README.md` -- all issues listed in Contributing help-needed section are open in GitLab.
+- **Resolved date:** 2026-03-24
+
 ---
 
 ## Won't Do / Deferred
 
-_No Won't-Do items in the main gap tracker. All 47 gaps have been resolved._
+_No Won't-Do items in the main gap tracker. 51 of 52 gaps have been resolved. GAP-0052 remains open (blocked on #31)._

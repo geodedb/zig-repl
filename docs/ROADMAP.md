@@ -50,7 +50,7 @@ Platform-specific improvements and extensibility features.
 
 | Issue | Title | Priority | Status |
 |-------|-------|----------|--------|
-| [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) | Improve Windows terminal support | High | Open |
+| [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) | Improve Windows terminal support | High | Closed |
 | [#16](https://gitlab.com/devnw/zig/repl/-/issues/16) | Add plugin/hook system | Low | Open |
 | [#17](https://gitlab.com/devnw/zig/repl/-/issues/17) | Implement async input handling | Medium | Open |
 | [#18](https://gitlab.com/devnw/zig/repl/-/issues/18) | Add configurable tab width | Low | Open |

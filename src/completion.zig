@@ -185,7 +185,7 @@ fn getHomeDir() ?[]const u8 {
 }
 
 /// Static buffer for the Windows home directory path (UTF-8 decoded).
-var home_dir_buf: [512]u8 = undefined;
+threadlocal var home_dir_buf: [512]u8 = undefined;
 
 /// Generate file path completion candidates.
 pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !void {

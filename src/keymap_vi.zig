@@ -120,8 +120,8 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         'o' => {
             state.vi_mode = .insert;
             state.cursor = state.buffer.items.len;
-            // Alloc failure is non-critical: cursor stays at end, user sees no newline
-            state.buffer.append(state.allocator, '\n') catch {};
+            // Alloc failure: abort to insert mode without advancing cursor
+            state.buffer.append(state.allocator, '\n') catch return .vi_insert_mode;
             state.cursor += 1;
             return .vi_insert_mode;
         },

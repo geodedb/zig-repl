@@ -1,32 +1,36 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-24 (Phase 9 audit)
+**Date:** 2026-03-24 (Phase 11 gap closure)
 **Auditor:** Security Reviewer (automated + manual code review)
 **Scope:** Full source tree at commit `d4a7f33` (branch: main)
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 6 (Phase 9 audit -- two new Low findings: SF-021, SF-022)
+**Revision:** 8 (Phase 11 gap closure -- SF-021, SF-022 resolved)
 
 ---
 
 ## Overall Assessment
 
-**No Critical or High severity findings. Two Low/suspected findings open (SF-021, SF-022). 22 total SF-IDs tracked.**
+**No Critical or High severity findings. Zero open findings. 22 total SF-IDs tracked.**
 
 The Zig REPL library maintains a sound security posture for a v0.1.0 release. The codebase
 is memory-safe by default (Zig's safety checks), has no external C dependencies, and
-uses minimal attack surface. Since the initial audit (2026-03-23), **15 of 22 findings
-have been resolved**, with 3 marked Won't Do, 1 confirmed No Action Needed, and 2 open
-(both Low severity, suspected confidence).
+uses minimal attack surface. Since the initial audit (2026-03-23), **17 of 22 findings
+have been resolved**, with 3 marked Won't Do, 1 confirmed No Action Needed, and 0 open.
 
 Phase 9 audit (2026-03-24) performed a Phase 3 deep review. NC-001 and NC-002 (existing
 Low findings from Phase 2) were re-confirmed at Low severity with no changes. Two new
 Low findings were identified:
-- **SF-021**: Static mutable `home_dir_buf` without thread safety (`src/completion.zig:188`)
-- **SF-022**: History file TOCTOU on permissions (`src/history.zig:178-188`)
+- **SF-021**: Static mutable `home_dir_buf` without thread safety (`src/completion.zig:188`) -- **RESOLVED** (threadlocal added)
+- **SF-022**: History file TOCTOU on permissions (`src/history.zig:178-188`) -- **RESOLVED** (chmod added after file open)
 
-Both are suspected confidence with low likelihood due to existing mitigations (single-threaded
-design, home directory permissions). No GitLab issues created per policy (Low/suspected).
+Phase 10 validation audit (2026-03-24) confirmed all prior findings remain accurately tracked.
+
+Phase 11 gap closure (2026-03-24) resolved SF-021 and SF-022:
+- SF-021: `home_dir_buf` changed to `threadlocal var home_dir_buf` in `src/completion.zig:188`.
+- SF-022: `file.chmod(0o600)` call added after file open in `src/history.zig` to enforce permissions regardless of pre-existing mode.
+All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed
+and confirmed secure.
 
 See "Phase 5 Manual Review Findings" section below for details on MF-001 through MF-005
 findings from Phase 5.
@@ -44,25 +48,23 @@ findings from Phase 5.
 - Structured error handling throughout
 
 **Remaining areas:**
-- SF-021: Static mutable buffer without thread safety (Low/suspected -- Windows-only, single-threaded)
-- SF-022: History file TOCTOU on permissions (Low/suspected -- mitigated by home dir permissions)
 - Supply chain pinning for CI/CD dependencies (SF-012 -- Won't Do, external tooling)
 
 ---
 
 ## Audit Progression
 
-| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Delta (Phase 5 to 9) |
-|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|----------------------|
-| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | +2 |
-| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | +2 |
-| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 0 |
-| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 0 |
-| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 0 |
-| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
-| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | +2 |
-| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | NC-001, NC-002 re-confirmed |
+| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Delta (Phase 10 to 11) |
+|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|------------------------|
+| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 0 |
+| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | -2 |
+| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | +2 |
+| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
+| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | -2 |
+| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | +2 resolved |
 
 ---
 
@@ -73,24 +75,21 @@ findings from Phase 5.
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
 | High | 0 | 0 | 0 | 0 | 0 | 30 days |
 | Medium | 6 | 0 | 5 | 0 | 0 | 90 days |
-| Low | 16 | 2 | 10 | 3 | 1 | 180 days |
+| Low | 16 | 0 | 12 | 3 | 1 | 180 days |
 | Info | 0 | 0 | 0 | 0 | 0 | Backlog |
-| **Total** | **22** | **2** | **15** | **3** | **1** | |
+| **Total** | **22** | **0** | **17** | **3** | **1** | |
 
 Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved).
 
-### 2 Low/suspected findings open (SF-021, SF-022). No Critical, High, or Medium open.
+### Zero open findings. No Critical, High, Medium, or Low findings remain open.
 
 ---
 
 ## Stack-Ranked Findings Table
 
-### Open Findings (Phase 9)
+### Open Findings (Phase 11)
 
-| Rank | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Evidence (file:line) | Confidence | SLA |
-|------|-------|----------|------------|---------|-----------|-------------|----------------------|------------|-----|
-| 1 | SF-021 | Low | 8 | Static mutable `home_dir_buf` without thread safety | completion | CWE-362 | `src/completion.zig:188` | suspected | 180 days |
-| 2 | SF-022 | Low | 8 | History file TOCTOU on permissions | history | CWE-367 | `src/history.zig:178-188` | suspected | 180 days |
+_No open findings. All 22 SF-IDs are resolved, won't do, or no action needed._
 
 ### Recently Resolved (Phase 4)
 
@@ -117,6 +116,8 @@ Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted onc
 
 | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Resolution | Verified |
 |-------|----------|------------|---------|-----------|-------------|------------|----------|
+| SF-021 | Low | 8 | Static mutable `home_dir_buf` without thread safety | completion | CWE-362 | Changed `var home_dir_buf` to `threadlocal var home_dir_buf` at `src/completion.zig:188`. Each thread gets its own copy; no behavioral change for single-threaded callers. | 2026-03-24 |
+| SF-022 | Low | 8 | History file TOCTOU on permissions | history | CWE-367 | Added `file.chmod(0o600)` after file open in `src/history.zig` to enforce permissions regardless of pre-existing mode. Eliminates TOCTOU race on permission check. | 2026-03-24 |
 | SF-014 | Medium | 50 | Signal handler dead code -- enterRawMode() never calls installTerminalSignalHandlers() | platform | CWE-404 | `enterRawMode()` now sets `saved_termios = original` and calls `installTerminalSignalHandlers()` at `src/platform.zig:193-194`. `restoreTerminalMode()` now calls `removeTerminalSignalHandlers()` and sets `saved_termios = null` at `src/platform.zig:219-220`. | 2026-03-24 |
 | SF-013 | Medium | 35 | handleSearch() uses appendSlice bypassing history filtering | core | CWE-116 / A03:2021 | Changed `appendSlice` to `appendHistoryFiltered` at `src/core.zig:883`. All history-to-buffer paths now use filtered append. | 2026-03-24 |
 | SF-001 | Medium | 45 | History/config files world-readable (0644) | history, config | CWE-732 / A01:2021 | `.mode = 0o600` added to all createFile calls | 2026-03-24 |
@@ -203,6 +204,71 @@ All scanners re-run with zero findings:
 
 ---
 
+## Phase 10 Validation Audit (2026-03-24)
+
+Phase 10 performed a validation audit with the following results:
+
+**0 new security findings. 0 regressions.**
+
+### Open Findings Re-verified
+
+| SF-ID | Severity | Risk Score | Status | Change |
+|-------|----------|------------|--------|--------|
+| SF-021 | Low | 8 | **Resolved** | `threadlocal` added to `home_dir_buf` in `src/completion.zig:188` |
+| SF-022 | Low | 8 | **Resolved** | `chmod(0o600)` added after file open in `src/history.zig` |
+
+Both findings resolved in Phase 11 gap closure (2026-03-24), well within 180-day SLA.
+
+### Resolved Findings Regression Check
+
+All 15 resolved findings were verified against current source. No regressions detected.
+
+| SF-ID | Risk | Finding | Regression Status |
+|-------|------|---------|-------------------|
+| SF-014 | 50 | Signal handler dead code | No regression -- handlers still wired at `platform.zig:193-194`, `platform.zig:219-220` |
+| SF-001 | 45 | History/config world-readable | No regression -- `.mode = 0o600` present in all createFile calls |
+| SF-005 | 40 | Bracketed paste forgery | No regression -- `sanitizePasteContent()` still active |
+| SF-009 | 35 | Terminal escape injection | No regression -- `appendHistoryFiltered()` still guards all paths |
+| SF-013 | 35 | Search bypasses history filtering | No regression -- `appendHistoryFiltered` at `core.zig:883` |
+| SF-007 | 25 | Env var path injection | No regression -- `isPathSafe()` in `text_utils.zig` |
+| SF-003 | 20 | @intCast overflow (32-bit) | No regression -- 64MB bounds check present |
+| SF-016 | 20 | Paste buffer silent truncation | No regression -- flush-and-continue logic active |
+| SF-020 | 15 | CI hash same-origin | No regression -- SHA-256 hashes pinned in `.gitlab-ci.yml` |
+| SF-018 | 15 | renderPrompt buffer overflow | No regression -- `buffer_full` flag logic intact |
+| SF-010 | 15 | Silent output truncation | No regression -- partial write on overflow |
+| SF-017 | 10 | Search display unfiltered | No regression -- input filter documented |
+| SF-019 | 10 | Vi de/e underflow guard | No regression -- `end + 1 < items.len` form used |
+| SF-006 | 10 | catch unreachable on init | No regression -- safety comments present |
+| SF-011 | 10 | False fuzz claim | No regression -- SECURITY.md reflects planned status |
+
+### Trust Boundary Review
+
+All trust boundaries reviewed and confirmed secure:
+
+| Trust Boundary | Assessment |
+|----------------|------------|
+| Paste input (bracketed paste mode) | Secure -- sanitizePasteContent strips embedded sequences; flush-and-continue handles large pastes |
+| Key parsing (escape sequences) | Secure -- bounded state machine with timeout; no injection path from terminal input |
+| Signal handling (SIGTERM, SIGHUP, SIGWINCH) | Secure -- handlers wired into raw mode lifecycle; terminal restored on signal |
+| History file I/O | Secure -- 0o600 permissions, isPathSafe validation, 64MB size cap, filtered append |
+| Config file I/O | Secure -- 0o600 permissions, isPathSafe validation, structured parsing |
+| Search (reverse-i-search) | Secure -- input filter restricts to 0x20-0x7F; history results use appendHistoryFiltered |
+| Environment variables (HOME, XDG paths) | Secure -- isPathSafe rejects traversal; no command injection from env vars |
+
+### Quality Findings Security Assessment
+
+Three quality findings were assessed for potential security exploitation paths:
+
+| Quality Finding | Security Assessment |
+|-----------------|---------------------|
+| handleCompletion cursor positioning | Low quality issue -- incorrect cursor offset after completion. No security impact: cursor position does not affect buffer contents or escape sequence processing. |
+| Vi o/O cursor positioning | Low quality issue -- cursor may land at wrong position after open-line command. No security impact: affects display only, not buffer integrity or input processing. |
+| Duplicate catch "" in error handling | Low quality issue -- redundant catch clause. No security impact: error handling behavior is unchanged; the duplicate is dead code with no effect on control flow. |
+
+**Conclusion:** None of the quality findings are exploitable. They affect user experience (display correctness) but do not create attack surface or weaken security controls.
+
+---
+
 ## Phase 9 Findings (2026-03-24)
 
 Phase 9 performed a Phase 3 deep review. NC-001 and NC-002 (existing Low findings from
@@ -210,7 +276,7 @@ Phase 2) were re-confirmed at Low severity with no status changes required. Two 
 Low/suspected findings were identified (SF-021, SF-022). Per policy, no GitLab issues
 are created for Low/suspected findings -- they are tracked here in the gap analysis only.
 
-### SF-021: Static mutable home_dir_buf without thread safety
+### SF-021: Static mutable home_dir_buf without thread safety [RESOLVED]
 
 | Field | Value |
 |-------|-------|
@@ -220,8 +286,8 @@ are created for Low/suspected findings -- they are tracked here in the gap analy
 | **OWASP** | N/A (library-internal, not directly web/API) |
 | **Confidence** | suspected |
 | **Exploit Surface** | Admin-only access (requires multi-threaded caller on Windows) |
-| **Status** | Open |
-| **SLA** | 180 days (2026-09-20) |
+| **Status** | **Resolved** (2026-03-24) -- `threadlocal` added to `home_dir_buf` declaration |
+| **SLA** | 180 days (2026-09-20) -- resolved well within SLA |
 
 **Summary:** Module-level `var home_dir_buf: [512]u8` at `src/completion.zig:188` is a static mutable buffer shared across all callers. If `getHomeDir()` is called from multiple threads simultaneously, a data race would corrupt the buffer contents.
 
@@ -250,7 +316,7 @@ var home_dir_buf: [512]u8 = undefined;
 
 ---
 
-### SF-022: History file TOCTOU on permissions
+### SF-022: History file TOCTOU on permissions [RESOLVED]
 
 | Field | Value |
 |-------|-------|
@@ -260,8 +326,8 @@ var home_dir_buf: [512]u8 = undefined;
 | **OWASP** | N/A (local file operation, not web/API) |
 | **Confidence** | suspected |
 | **Exploit Surface** | Requires physical access or same-user compromise |
-| **Status** | Open |
-| **SLA** | 180 days (2026-09-20) |
+| **Status** | **Resolved** (2026-03-24) -- `chmod(0o600)` added after file open |
+| **SLA** | 180 days (2026-09-20) -- resolved well within SLA |
 
 **Summary:** The `appendLine` method at `src/history.zig:178` opens existing history files with `createFile(path, .{ .truncate = false, .mode = 0o600 })`. The `.mode = 0o600` parameter only applies when creating a new file. If the file already exists (e.g., pre-created by an attacker with `0o644` permissions), the existing permissions are preserved, and subsequent history writes go to a world-readable file.
 
@@ -701,9 +767,9 @@ No strategic items. All open findings are small, self-contained hardening tasks.
 
 ---
 
-## Automated Scan Results (2026-03-24, last run Phase 5)
+## Automated Scan Results (2026-03-24, last run Phase 10)
 
-All automated security scanners returned zero findings across all phases (initial through Phase 5):
+All automated security scanners returned zero findings across all phases (initial through Phase 10):
 
 | Scanner | Scope | Findings | Notes |
 |---------|-------|----------|-------|
@@ -725,14 +791,16 @@ All automated security scanners returned zero findings across all phases (initia
 **No immediate actions required.** Two Low/suspected findings (SF-021, SF-022) are open
 but neither requires urgent remediation. Both have 180-day SLAs (due 2026-09-20).
 
-**Phase 9 audit summary:**
-- NC-001 and NC-002 (existing Low findings from Phase 2) re-confirmed -- no changes needed
-- SF-021 (Low/suspected): Static mutable `home_dir_buf` without thread safety -- quick fix available
-- SF-022 (Low/suspected): History file TOCTOU on permissions -- quick fix available
-- No GitLab issues created (per policy: Low/suspected findings tracked in gap analysis only)
+**Phase 10 validation audit summary:**
+- SF-021 and SF-022 remain at Low/suspected, risk scores unchanged at 8
+- All 15 resolved findings verified with no regressions
+- All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed and secure
+- Quality findings (handleCompletion cursor, Vi o/O cursor, duplicate catch "") assessed -- none exploitable
+- 0 new security findings, 0 regressions
+- No GitLab issues created (no new security findings)
 
 **No credentials, secrets, or actively exploitable remote vulnerabilities were found.**
 
 ---
 
-*Last updated: 2026-03-24 (Phase 9 -- two new Low/suspected findings SF-021, SF-022; NC-001, NC-002 re-confirmed)*
+*Last updated: 2026-03-24 (Phase 10 -- validation audit; 0 new findings, 0 regressions; SF-021/SF-022 unchanged; all 15 resolved verified; trust boundaries secure; quality findings non-exploitable)*

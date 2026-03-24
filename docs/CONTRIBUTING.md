@@ -139,9 +139,14 @@ repl/
 ├── tests/
 │   └── integration.zig  # Integration tests
 ├── docs/
-│   ├── ROADMAP.md       # Project roadmap
-│   ├── CONTRIBUTING.md  # This file
-│   └── ARCHITECTURE.md  # Architecture overview
+│   ├── ARCHITECTURE.md          # Architecture overview
+│   ├── CONTRIBUTING.md          # This file
+│   ├── GAP_ANALYSIS.md          # Functional gap analysis
+│   ├── GAP_ANALYSIS_RESOLVED.md # Resolved gap items
+│   ├── PERF_GAP_ANALYSIS.md     # Performance gap analysis
+│   ├── QUALITY_GAP_ANALYSIS.md  # Code quality gap analysis
+│   ├── ROADMAP.md               # Project roadmap
+│   └── SECURITY_GAP_ANALYSIS.md # Security gap analysis
 ├── build.zig            # Build configuration
 └── README.md            # Project overview
 ```

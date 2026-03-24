@@ -182,6 +182,11 @@ pub const HistoryStore = struct {
             };
             defer file.close();
 
+            // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
+            if (comptime std.fs.has_executable_bit) {
+                file.chmod(0o600) catch {};
+            }
+
             try file.seekFromEnd(0);
             try file.writeAll(line);
             try file.writeAll("\n");

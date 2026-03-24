@@ -630,6 +630,9 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         .delete_word => {
             const end = findWordEnd(state.buffer.items, state.cursor);
             if (end > state.cursor) {
+                state.kill_ring.clearRetainingCapacity();
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
+                state.last_was_kill = true;
                 // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
                 state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
             }
@@ -648,13 +651,13 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         },
         .delete_to_eol => {
             state.kill_ring.clearRetainingCapacity();
-            try state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..]);
+            state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..]) catch {};
             state.buffer.items.len = state.cursor;
             state.last_was_kill = true;
         },
         .delete_to_bol => {
             state.kill_ring.clearRetainingCapacity();
-            try state.kill_ring.appendSlice(state.allocator, state.buffer.items[0..state.cursor]);
+            state.kill_ring.appendSlice(state.allocator, state.buffer.items[0..state.cursor]) catch {};
             // Single O(n) replaceRange instead of alloc+copy+clear+append cycle
             state.buffer.replaceRange(state.allocator, 0, state.cursor, &.{}) catch {};
             state.cursor = 0;
@@ -802,7 +805,7 @@ fn handleCompletion(state: *ReplState) void {
 
         // Save original prefix
         if (prefix.len > 0) {
-            ctx.original_prefix = state.allocator.dupe(u8, prefix) catch "";
+            ctx.original_prefix = state.allocator.dupe(u8, prefix) catch return;
         }
 
         // Call user's completion function to populate candidates
@@ -831,7 +834,7 @@ fn handleCompletion(state: *ReplState) void {
         }
 
         // Insert the completion
-        state.buffer.insertSlice(state.allocator, state.cursor, candidate) catch {};
+        state.buffer.insertSlice(state.allocator, state.cursor, candidate) catch return;
         state.cursor += candidate.len;
         state.content_changed = true;
     }
