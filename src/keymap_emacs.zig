@@ -13,6 +13,7 @@
 //! - Ctrl+Y: Yank from kill ring
 //! - Alt+B/F: Backward/forward word
 //! - Ctrl+R: Reverse search
+//! - Ctrl+_: Undo last edit
 //! - Ctrl+L: Clear screen
 
 const std = @import("std");
@@ -49,7 +50,7 @@ pub fn handleKey(state: anytype, key: core.KeyEvent) core.KeyAction {
             'c' => .cancel, // Ctrl+C: cancel
             'i', '\t' => .complete, // Tab: trigger tab completion
             'j', 'm', '\r', '\n' => .run, // Enter: run command
-            0x7f - 'a' + 1 => .delete_char_forward, // Delete key (mapped from ESC[3~)
+            0x7f => .undo, // Ctrl+_ (0x1f -> key 0x7f): undo last edit
             else => .none,
         };
     }
@@ -327,4 +328,14 @@ test "emacs Ctrl+Alt+E returns history_last" {
 
     const action = handleKey(&state, .{ .key = 'e', .ctrl = true, .alt = true });
     try std.testing.expectEqual(core.KeyAction.history_last, action);
+}
+
+test "emacs Ctrl+_ returns undo" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 3;
+
+    // Ctrl+_ sends raw 0x1f which the input parser maps to key=0x7f, ctrl=true
+    const action = handleKey(&state, .{ .key = 0x7f, .ctrl = true });
+    try std.testing.expectEqual(core.KeyAction.undo, action);
 }

@@ -169,6 +169,24 @@ pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
     };
 }
 
+/// Get the user's home directory in a cross-platform manner.
+/// On POSIX, reads $HOME. On Windows, reads $USERPROFILE (decoded to UTF-8).
+fn getHomeDir() ?[]const u8 {
+    if (builtin.os.tag == .windows) {
+        const key = std.unicode.utf8ToUtf16LeStringLiteral("USERPROFILE");
+        const value_w: [:0]const u16 = std.process.getenvW(key) orelse return null;
+        // Convert UTF-16LE to UTF-8 into a static buffer large enough for
+        // any realistic Windows profile path.
+        const n = std.unicode.utf16LeToUtf8(&home_dir_buf, value_w) catch return null;
+        return home_dir_buf[0..n];
+    } else {
+        return std.posix.getenv("HOME");
+    }
+}
+
+/// Static buffer for the Windows home directory path (UTF-8 decoded).
+var home_dir_buf: [512]u8 = undefined;
+
 /// Generate file path completion candidates.
 pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !void {
     var path_buf: [2048]u8 = undefined;
@@ -179,7 +197,7 @@ pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !
 
     // Handle tilde expansion
     if (prefix.len > 0 and prefix[0] == '~') {
-        const home = std.posix.getenv("HOME") orelse return;
+        const home = getHomeDir() orelse return;
         if (prefix.len == 1) {
             search_dir = home;
             file_prefix = "";
@@ -370,4 +388,26 @@ test "file path candidates limited to MAX_FILE_CANDIDATES" {
     try std.testing.expect(ctx.candidates.items.len <= MAX_FILE_CANDIDATES);
     // And since we created more files than the limit, it should be exactly the limit
     try std.testing.expect(ctx.candidates.items.len == MAX_FILE_CANDIDATES);
+}
+
+test "getHomeDir returns a non-null value on POSIX when HOME is set" {
+    // On the CI/test host, HOME should always be set.
+    if (builtin.os.tag != .windows) {
+        const home = getHomeDir();
+        try std.testing.expect(home != null);
+        try std.testing.expect(home.?.len > 0);
+        // The home directory should be an absolute path.
+        try std.testing.expect(home.?[0] == '/');
+    }
+}
+
+test "getHomeDir returns same value as std.posix.getenv HOME on POSIX" {
+    if (builtin.os.tag != .windows) {
+        const from_helper = getHomeDir();
+        const from_posix = std.posix.getenv("HOME");
+        if (from_posix) |expected| {
+            try std.testing.expect(from_helper != null);
+            try std.testing.expectEqualStrings(expected, from_helper.?);
+        }
+    }
 }

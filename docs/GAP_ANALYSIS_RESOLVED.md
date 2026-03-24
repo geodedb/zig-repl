@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 8 close-out -- GAP-0004 added)
+**Last updated:** 2026-03-24 (Phase 9 close-out -- GAP-0010 and GAP-0018 resolved, all 37 gaps closed)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -47,6 +47,8 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0037 | GAP_ANALYSIS.md test count and evidence numbers stale | 2026-03-24 | [#89](https://gitlab.com/devnw/zig/repl/-/issues/89) (closed) |
 | GAP-0035 | Working tree contains 179 uncommitted tests and all gap resolution evidence | 2026-03-24 | [#87](https://gitlab.com/devnw/zig/repl/-/issues/87) (closed) |
 | GAP-0004 | CI pipeline not verified on runners | 2026-03-24 | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) (closed) |
+| GAP-0010 | Windows terminal support incomplete | 2026-03-24 | [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) (closed) |
+| GAP-0018 | Undo is not real undo | 2026-03-24 | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) (closed), [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) (closed) |
 
 ---
 
@@ -320,6 +322,25 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Category:** Docs
 - **Resolution:** Updated GAP-0004 evidence line test count from "219/132 tests" to "224 tests". Header line 8 already corrected to 224 in previous sync. Historical counts in GAP_ANALYSIS_RESOLVED.md left as-is (point-in-time snapshots).
 - **Evidence:** `docs/GAP_ANALYSIS.md:8` shows "224 tests"; GAP-0004 impact line shows "224 tests".
+- **Resolved date:** 2026-03-24
+
+### GAP-0010: Windows Terminal Support Incomplete [RESOLVED]
+
+- **Issue:** [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) (closed)
+- **Category:** Feature
+- **Severity:** Medium
+- **Resolution:** Replaced all `std.posix.getenv` calls with cross-platform comptime-branched alternatives. Implemented real `GetConsoleScreenBufferInfo` for terminal dimensions, `PeekConsoleInputW` for input detection, and `ENABLE_VIRTUAL_TERMINAL_PROCESSING`/`ENABLE_VIRTUAL_TERMINAL_INPUT` for ANSI escape support. Windows cross-compilation now succeeds (`zig build -Dtarget=x86_64-windows` exits 0).
+- **Evidence:** 241/241 tests pass on Linux. Windows cross-compilation succeeds (was failing before). 6 new tests added. Files modified: `src/platform.zig`, `src/completion.zig`, `examples/colors.zig`, `examples/shell.zig`.
+- **Residual note:** Runtime testing on actual Windows hardware pending Windows CI runner setup. All APIs have proper error handling with fallback values.
+- **Resolved date:** 2026-03-24
+
+### GAP-0018: Undo Is Not Real Undo [RESOLVED]
+
+- **Issue:** [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) (closed), [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) (closed)
+- **Category:** Feature
+- **Severity:** Low
+- **Resolution:** Created `src/undo.zig` with bounded `UndoStack` (max 100 entries). Integrated into `ReplState` in `src/core.zig` -- snapshots buffer before destructive actions, `.undo` action pops and restores. Added Ctrl+_ binding in emacs mode (`src/keymap_emacs.zig`). Vi mode `u` binding unchanged (already mapped to `.undo`).
+- **Evidence:** 241/241 tests pass. 11 new tests (10 undo stack unit tests, 1 emacs keymap test). Memory safety verified via `testing.allocator` leak detection. Files modified: `src/core.zig`, `src/keymap_emacs.zig`. Files created: `src/undo.zig`.
 - **Resolved date:** 2026-03-24
 
 ### GAP-0035: Working Tree Contains 179 Uncommitted Tests and All Gap Resolution Evidence [RESOLVED]

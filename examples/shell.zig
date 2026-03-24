@@ -16,6 +16,7 @@
 //! It shows how the REPL library can be used for shell-like applications.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const repl = @import("repl");
 
 /// Shell context
@@ -213,18 +214,36 @@ fn handleCommand(
     return true;
 }
 
+/// Cross-platform getenv helper. On POSIX uses std.posix.getenv; on Windows
+/// converts the variable name at comptime and decodes the UTF-16 value into
+/// a module-level static buffer.
+fn crossGetenv(comptime name: []const u8) ?[]const u8 {
+    if (builtin.os.tag == .windows) {
+        const key_w = std.unicode.utf8ToUtf16LeStringLiteral(name);
+        const value_w: [:0]const u16 = std.process.getenvW(key_w) orelse return null;
+        const n = std.unicode.utf16LeToUtf8(&shell_env_buf, value_w) catch return null;
+        return shell_env_buf[0..n];
+    } else {
+        return std.posix.getenv(name);
+    }
+}
+
+var shell_env_buf: [1024]u8 = undefined;
+
 fn changeDirectory(out: repl.TerminalWriter, ctx: *ShellContext, args: []const u8, allocator: std.mem.Allocator) !void {
     var target: []const u8 = undefined;
 
     if (args.len == 0) {
-        // cd with no args goes to home
-        target = std.posix.getenv("HOME") orelse {
+        // cd with no args goes to home directory
+        const home_var = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+        target = crossGetenv(home_var) orelse {
             try out.writeError("HOME not set");
             return;
         };
     } else if (args[0] == '~') {
         // Expand tilde
-        const home = std.posix.getenv("HOME") orelse {
+        const home_var = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+        const home = crossGetenv(home_var) orelse {
             try out.writeError("HOME not set");
             return;
         };
@@ -276,8 +295,18 @@ fn echoCommand(out: repl.TerminalWriter, args: []const u8, ctx: *ShellContext) !
                 // Check our local env first, then system env
                 if (ctx.env.get(var_name)) |value| {
                     try out.write(value);
-                } else if (std.posix.getenv(var_name)) |value| {
-                    try out.write(value);
+                } else {
+                    if (builtin.os.tag == .windows) {
+                        // On Windows, use the allocating cross-platform API.
+                        if (std.process.getEnvVarOwned(std.heap.page_allocator, var_name)) |value| {
+                            defer std.heap.page_allocator.free(value);
+                            try out.write(value);
+                        } else |_| {}
+                    } else {
+                        if (std.posix.getenv(var_name)) |value| {
+                            try out.write(value);
+                        }
+                    }
                 }
             }
             i = j;

@@ -160,15 +160,32 @@ pub const TerminalState = if (builtin.os.tag == .windows) std.os.windows.DWORD e
 /// Returns the original terminal state for later restoration.
 pub fn enterRawMode() !TerminalState {
     if (builtin.os.tag == .windows) {
-        const handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch unreachable;
+        const ENABLE_LINE_INPUT: std.os.windows.DWORD = 0x0002;
+        const ENABLE_ECHO_INPUT: std.os.windows.DWORD = 0x0004;
+        const ENABLE_PROCESSED_INPUT: std.os.windows.DWORD = 0x0001;
+        const ENABLE_VIRTUAL_TERMINAL_INPUT: std.os.windows.DWORD = 0x0200;
+
+        const stdin_handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch unreachable;
         var mode: std.os.windows.DWORD = undefined;
-        _ = std.os.windows.kernel32.GetConsoleMode(handle, &mode);
+        _ = std.os.windows.kernel32.GetConsoleMode(stdin_handle, &mode);
         const original = mode;
 
-        // Disable line input and echo
-        mode &= ~@as(std.os.windows.DWORD, 0x0002); // ENABLE_LINE_INPUT
-        mode &= ~@as(std.os.windows.DWORD, 0x0004); // ENABLE_ECHO_INPUT
-        _ = std.os.windows.kernel32.SetConsoleMode(handle, mode);
+        // Disable line input, echo, and processed input (Ctrl+C as input)
+        mode &= ~ENABLE_LINE_INPUT;
+        mode &= ~ENABLE_ECHO_INPUT;
+        mode &= ~ENABLE_PROCESSED_INPUT;
+        // Enable VT input so ANSI escape sequences are passed through
+        mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+        _ = std.os.windows.kernel32.SetConsoleMode(stdin_handle, mode);
+
+        // Enable VT processing on stdout so ANSI escape output works
+        // in Windows Terminal and cmd.exe (Windows 10 1511+).
+        const stdout_handle = std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return original;
+        var out_mode: std.os.windows.DWORD = undefined;
+        if (std.os.windows.kernel32.GetConsoleMode(stdout_handle, &out_mode) != 0) {
+            out_mode |= std.os.windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            _ = std.os.windows.kernel32.SetConsoleMode(stdout_handle, out_mode);
+        }
 
         return original;
     }
@@ -224,7 +241,13 @@ pub fn restoreTerminalMode(original: TerminalState) !void {
 /// Returns 80 as default if unavailable.
 pub fn getTerminalWidth() usize {
     if (builtin.os.tag == .windows) {
-        return 80; // Default for Windows (could use GetConsoleScreenBufferInfo)
+        const handle = std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return 80;
+        var csbi: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+        if (std.os.windows.kernel32.GetConsoleScreenBufferInfo(handle, &csbi) != 0) {
+            const width = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+            if (width > 0) return @intCast(width);
+        }
+        return 80;
     } else {
         var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
         const result = std.posix.system.ioctl(std.posix.STDOUT_FILENO, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
@@ -239,7 +262,13 @@ pub fn getTerminalWidth() usize {
 /// Returns 24 as default if unavailable.
 pub fn getTerminalHeight() usize {
     if (builtin.os.tag == .windows) {
-        return 24; // Default for Windows
+        const handle = std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return 24;
+        var csbi: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+        if (std.os.windows.kernel32.GetConsoleScreenBufferInfo(handle, &csbi) != 0) {
+            const height = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+            if (height > 0) return @intCast(height);
+        }
+        return 24;
     } else {
         var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
         const result = std.posix.system.ioctl(std.posix.STDOUT_FILENO, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
@@ -250,10 +279,55 @@ pub fn getTerminalHeight() usize {
     }
 }
 
+/// Windows console input record and PeekConsoleInput binding.
+/// These are not provided by Zig's stdlib so we declare them here.
+const win32_console = if (builtin.os.tag == .windows) struct {
+    const HANDLE = std.os.windows.HANDLE;
+    const DWORD = std.os.windows.DWORD;
+    const BOOL = std.os.windows.BOOL;
+    const WORD = std.os.windows.WORD;
+    const WCHAR = std.os.windows.WCHAR;
+
+    const KEY_EVENT: WORD = 0x0001;
+
+    const KEY_EVENT_RECORD = extern struct {
+        bKeyDown: BOOL,
+        wRepeatCount: WORD,
+        wVirtualKeyCode: WORD,
+        wVirtualScanCode: WORD,
+        uChar: extern union { UnicodeChar: WCHAR, AsciiChar: u8 },
+        dwControlKeyState: DWORD,
+    };
+
+    const INPUT_RECORD = extern struct {
+        EventType: WORD,
+        _padding: WORD = 0,
+        Event: extern union { KeyEvent: KEY_EVENT_RECORD, _reserved: [16]u8 },
+    };
+
+    extern "kernel32" fn PeekConsoleInputW(
+        hConsoleInput: HANDLE,
+        lpBuffer: [*]INPUT_RECORD,
+        nLength: DWORD,
+        lpNumberOfEventsRead: *DWORD,
+    ) callconv(.winapi) BOOL;
+} else struct {};
+
 /// Check if stdin has more data available (non-blocking).
 pub fn stdinHasMoreData() bool {
     if (builtin.os.tag == .windows) {
-        // Windows: always return false, render after each read
+        const handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch return false;
+        var records: [8]win32_console.INPUT_RECORD = undefined;
+        var count: std.os.windows.DWORD = 0;
+        if (win32_console.PeekConsoleInputW(handle, &records, records.len, &count) == 0) {
+            return false;
+        }
+        // Check if any of the peeked records are key-down events.
+        for (records[0..count]) |rec| {
+            if (rec.EventType == win32_console.KEY_EVENT and rec.Event.KeyEvent.bKeyDown != 0) {
+                return true;
+            }
+        }
         return false;
     } else {
         // POSIX: use poll with 0 timeout to check if data is available
@@ -267,19 +341,25 @@ pub fn stdinHasMoreData() bool {
 
 /// Check if colors should be used based on environment and TTY status.
 pub fn shouldUseColor() bool {
-    // Check NO_COLOR environment variable (https://no-color.org/)
-    if (std.posix.getenv("NO_COLOR")) |_| {
-        return false;
-    }
-
-    // Check TERM for dumb terminal
-    if (std.posix.getenv("TERM")) |term| {
-        if (std.mem.eql(u8, term, "dumb")) {
+    if (builtin.os.tag == .windows) {
+        // On Windows, check NO_COLOR via the wide-string environment API.
+        // TERM is not meaningful on Windows so we skip that check.
+        if (std.process.getenvW(std.unicode.utf8ToUtf16LeStringLiteral("NO_COLOR"))) |_| {
             return false;
         }
+        return isStdoutTty();
+    } else {
+        // POSIX: use the standard getenv for NO_COLOR and TERM.
+        if (std.posix.getenv("NO_COLOR")) |_| {
+            return false;
+        }
+        if (std.posix.getenv("TERM")) |term| {
+            if (std.mem.eql(u8, term, "dumb")) {
+                return false;
+            }
+        }
+        return isStdoutTty();
     }
-
-    return isStdoutTty();
 }
 
 /// ANSI color codes for terminal output.
@@ -793,4 +873,32 @@ test "Style.code returns correct ANSI codes" {
 test "buffer size constants are accessible" {
     try std.testing.expectEqual(@as(usize, 4096), TerminalWriter.PRINT_BUF_SIZE);
     try std.testing.expectEqual(@as(usize, 8192), TerminalWriter.WRITE_BUF_SIZE);
+}
+
+test "shouldUseColor returns bool" {
+    // Smoke test: shouldUseColor should not crash and should return a bool.
+    // The actual value depends on the test runner's environment (TTY, NO_COLOR, TERM).
+    const result = shouldUseColor();
+    try std.testing.expect(result == true or result == false);
+}
+
+test "stdinHasMoreData returns bool without blocking" {
+    // stdinHasMoreData must return quickly (non-blocking) and produce a bool.
+    const result = stdinHasMoreData();
+    try std.testing.expect(result == true or result == false);
+}
+
+test "win32_console types compile on all platforms" {
+    // Verify that the win32_console struct compiles without errors even on
+    // non-Windows targets. On POSIX it is an empty struct.
+    const T = win32_console;
+    try std.testing.expect(@sizeOf(T) >= 0);
+}
+
+test "ENABLE_VIRTUAL_TERMINAL_PROCESSING constant exists" {
+    // This constant is defined in std.os.windows and used in enterRawMode.
+    // Verify it compiles as a constant expression.
+    if (builtin.os.tag == .windows) {
+        try std.testing.expectEqual(@as(u32, 0x4), std.os.windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
 }

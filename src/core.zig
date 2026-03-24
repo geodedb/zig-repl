@@ -20,6 +20,7 @@ const keymap_vi = @import("keymap_vi.zig");
 const text_utils = @import("text_utils.zig");
 const render = @import("render.zig");
 const input_mod = @import("input.zig");
+const undo_mod = @import("undo.zig");
 
 const findWordStart = text_utils.findWordStart;
 const findWordEnd = text_utils.findWordEnd;
@@ -178,6 +179,7 @@ pub const Repl = struct {
             .quit_requested = false,
             .kill_ring = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .last_was_kill = false,
+            .undo_stack = undo_mod.UndoStack.init(opts.allocator, undo_mod.UndoStack.default_max_entries),
             .search_buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .searching = false,
             .completion_ctx = completion.CompletionContext.init(opts.allocator),
@@ -217,6 +219,7 @@ pub const ReplState = struct {
     quit_requested: bool,
     kill_ring: std.ArrayList(u8),
     last_was_kill: bool,
+    undo_stack: undo_mod.UndoStack,
     search_buffer: std.ArrayList(u8),
     searching: bool,
     completion_ctx: completion.CompletionContext,
@@ -242,6 +245,7 @@ pub const ReplState = struct {
     pub fn deinit(self: *ReplState) void {
         self.buffer.deinit(self.allocator);
         self.kill_ring.deinit(self.allocator);
+        self.undo_stack.deinit();
         self.search_buffer.deinit(self.allocator);
         self.multi_line_buffer.deinit(self.allocator);
         self.completion_ctx.deinit();
@@ -360,10 +364,36 @@ fn processInput(state: *ReplState) !void {
             const key_event = parseKeyEvent(remaining) catch break;
             i += getKeyEventLength(remaining);
 
+            // Snapshot buffer state before the keymap handler runs, since
+            // some keymaps (emacs, vi) modify the buffer directly for
+            // insert actions.  The snapshot is kept only if the resulting
+            // action is destructive; otherwise it is discarded.
+            const pre_buffer = state.allocator.dupe(u8, state.buffer.items) catch null;
+            const pre_cursor = state.cursor;
+
             const action = switch (state.keymap) {
                 .emacs => keymap_emacs.handleKey(state, key_event),
                 .vi => keymap_vi.handleKey(state, key_event),
             };
+
+            // Determine if this action modifies buffer content.
+            const is_destructive = switch (action) {
+                .insert, .insert_tab, .reverse_tab, .backspace, .delete_char, .delete_char_forward, .delete_word, .delete_word_backward, .delete_to_eol, .delete_to_bol, .yank => true,
+                else => false,
+            };
+
+            if (is_destructive) {
+                if (pre_buffer) |buf_snap| {
+                    // pushOwned takes ownership; no extra free needed.
+                    state.undo_stack.pushOwned(buf_snap, pre_cursor) catch {
+                        // On error, we still own the buffer.
+                        state.allocator.free(buf_snap);
+                    };
+                }
+            } else {
+                if (pre_buffer) |buf_snap| state.allocator.free(buf_snap);
+            }
+
             processAction(state, action) catch break;
             last_action = action;
         }
@@ -396,6 +426,7 @@ fn processInput(state: *ReplState) !void {
 fn resetLineState(state: *ReplState) void {
     state.buffer.clearRetainingCapacity();
     state.cursor = 0;
+    state.undo_stack.clear();
     state.last_visual_lines = 0;
     state.last_cursor_row = 0;
     state.content_changed = true;
@@ -699,11 +730,15 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             state.cursor += state.kill_ring.items.len;
         },
         .undo => {
-            // Known limitation: this is not a true undo -- it replaces the buffer
-            // with the kill ring contents. A proper undo stack is tracked in issue #5.
-            state.buffer.clearRetainingCapacity();
-            try state.buffer.appendSlice(state.allocator, state.kill_ring.items);
-            state.cursor = state.buffer.items.len;
+            if (state.undo_stack.pop()) |entry| {
+                state.buffer.clearRetainingCapacity();
+                state.buffer.appendSlice(state.allocator, entry.buffer) catch {
+                    state.allocator.free(entry.buffer);
+                    return;
+                };
+                state.cursor = entry.cursor;
+                state.allocator.free(entry.buffer);
+            }
         },
         .clear_screen => {
             const stdout = platform.getStdoutHandle();
@@ -821,6 +856,7 @@ fn createTestState(allocator: std.mem.Allocator, hist: *history_mod.HistoryStore
         .quit_requested = false,
         .kill_ring = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
         .last_was_kill = false,
+        .undo_stack = undo_mod.UndoStack.init(allocator, undo_mod.UndoStack.default_max_entries),
         .search_buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
         .searching = false,
         .completion_ctx = completion.CompletionContext.init(allocator),

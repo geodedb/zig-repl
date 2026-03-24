@@ -12,6 +12,7 @@
 //! Run with: zig build run-colors
 
 const std = @import("std");
+const builtin = @import("builtin");
 const repl = @import("repl");
 
 pub fn main() !void {
@@ -318,17 +319,25 @@ fn showColorStatus(out: repl.TerminalWriter) !void {
     try out.print("  shouldUseColor():   {s}\n", .{if (repl.platform.shouldUseColor()) "yes" else "no"});
 
     // Check environment
-    if (std.posix.getenv("NO_COLOR")) |_| {
-        try out.write("  NO_COLOR:           set (colors disabled)\n");
+    if (builtin.os.tag == .windows) {
+        if (std.process.getenvW(std.unicode.utf8ToUtf16LeStringLiteral("NO_COLOR"))) |_| {
+            try out.write("  NO_COLOR:           set (colors disabled)\n");
+        } else {
+            try out.write("  NO_COLOR:           not set\n");
+        }
+        try out.write("  TERM:               (not applicable on Windows)\n");
     } else {
-        try out.write("  NO_COLOR:           not set\n");
-    }
-
-    if (std.posix.getenv("TERM")) |term| {
-        try out.write("  TERM:               ");
-        try out.writeLine(term);
-    } else {
-        try out.write("  TERM:               not set\n");
+        if (std.posix.getenv("NO_COLOR")) |_| {
+            try out.write("  NO_COLOR:           set (colors disabled)\n");
+        } else {
+            try out.write("  NO_COLOR:           not set\n");
+        }
+        if (std.posix.getenv("TERM")) |term| {
+            try out.write("  TERM:               ");
+            try out.writeLine(term);
+        } else {
+            try out.write("  TERM:               not set\n");
+        }
     }
 
     try out.write("\nTo disable colors: export NO_COLOR=1\n\n");

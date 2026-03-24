@@ -1,9 +1,9 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-24 (Phase 12 close-out -- QF-050..QF-054 resolved, issues #90..#94 closed)
-**Audit phase**: Phase 12 -- close-out
-**Total findings**: 54 (4 deferred, 2 won't-do, 48 resolved, 0 open)
+**Last updated**: 2026-03-24 (Phase 13 -- QF-015 resolved via GAP-0018 undo stack implementation)
+**Audit phase**: Phase 13 -- GAP-0018 close-out
+**Total findings**: 54 (3 deferred, 2 won't-do, 49 resolved, 0 open)
 
 ---
 
@@ -14,7 +14,7 @@
 | Severity | Count | PriorityScore Range |
 |----------|-------|---------------------|
 | Critical | 0     | --                  |
-| High     | 2     | 80-85               |
+| High     | 1     | 85                  |
 | Medium   | 1     | 45                  |
 | Low      | 1     | 25                  |
 
@@ -23,16 +23,15 @@
 | Severity | Count (Total) | Open | Deferred | Won't Do | Resolved |
 |----------|---------------|------|----------|----------|----------|
 | Critical | 6             | 0    | 0        | 0        | 6        |
-| High     | 10            | 0    | 2        | 0        | 8        |
+| High     | 10            | 0    | 1        | 0        | 9        |
 | Medium   | 23            | 0    | 1        | 1        | 21       |
 | Low      | 15            | 0    | 1        | 0        | 14       |
 
 ### Top Deferred Risks
 
 1. **Zero test coverage for core REPL loop (partial)** (QF-026, Score 85) -- `processInput` and `processAction` still need dedicated mock-based test harness. Deferred; requires mock stdin/stdout infrastructure.
-2. **.undo replaces buffer with kill ring (not undo)** (QF-015, Score 80) -- Doc comment added but semantic fix deferred to issue #5.
-3. **Config.saveToFile/loadFromFile never called** (QF-018, Score 45) -- Documented as consumer-facing API. Not dead code per se.
-4. **Format enum never used at runtime** (QF-019, Score 25) -- Documented as consumer-facing API.
+2. **Config.saveToFile/loadFromFile never called** (QF-018, Score 45) -- Documented as consumer-facing API. Not dead code per se.
+3. **Format enum never used at runtime** (QF-019, Score 25) -- Documented as consumer-facing API.
 
 ---
 
@@ -43,7 +42,7 @@
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Evidence | Issue | Fix Summary | Owner | Effort | Status |
 |------|-------|----------|-------|----------|---------|-----------|----------|-------|-------------|-------|--------|--------|
 | 1 | QF-026 | High | 85 | Testing | Core loop test coverage partial | core.zig | `processInput`, `processAction`: 0 direct tests; ancillary tests exist | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Create test harness with mock stdin/stdout; test each KeyAction path | Maintainers | L | Deferred |
-| 2 | QF-015 | High | 80 | ErrorHandling | .undo replaces buffer with kill ring (not undo) | core.zig | clears buffer, copies kill_ring; doc comment added | [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Implement proper undo stack (deferred to #5) | Maintainers | L | Deferred |
+| 2 | QF-015 | High | 80 | ErrorHandling | .undo replaces buffer with kill ring (not undo) | core.zig, undo.zig | Real undo stack implemented in src/undo.zig, integrated into core.zig. GAP-0018 resolved. | [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Bounded UndoStack (max 100) in src/undo.zig; snapshots before destructive ops; .undo pops and restores | Maintainers | L | Resolved |
 | 3 | QF-053 | High | 60 | ErrorHandling | flushPasteBuffer `catch {}` on insertSlice silently loses paste + cursor invariant violated | core.zig | L470: `insertSlice(...) catch {}`; L471: `cursor += sanitized.len` runs regardless of insert success | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Changed `catch {}` to `catch return` so cursor advancement is guarded on insertSlice success | Maintainers | S | Resolved |
 | 4 | QF-052 | Medium | 48 | Correctness | handleSearch reads 256 bytes but processes only search_buf[0], discarding bytes 1..n | core.zig | L802-808: `const n = try stdin.read(&search_buf)` then `const c = search_buf[0]`; bytes 1..n lost | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Wrapped character processing in `for (search_buf[0..n])` loop; all bytes now processed | Maintainers | S | Resolved |
 | 5 | QF-018 | Medium | 45 | DeadCode | Config.saveToFile/loadFromFile never called | config.zig | Lines 68-171: defined but no callers; documented as consumer API | -- | Documented as consumer API; see #39 | Maintainers | S | Deferred |
@@ -159,7 +158,7 @@
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
-| QF-015 | 80 | High | .undo replaces buffer with kill ring (doc'd, full fix deferred) | Deferred |
+| QF-015 | 80 | High | .undo replaces buffer with kill ring -- real undo stack implemented (GAP-0018) | Resolved |
 | QF-053 | 60 | High | flushPasteBuffer `catch return` guards cursor on OOM | Resolved |
 | QF-014 | 45 | Medium | Vi kill ring catch {} on alloc | Won't Do |
 
@@ -238,7 +237,7 @@
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
 | QF-026 | 85 | Build test infrastructure for core loop; achieve 50%+ coverage | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Deferred -- requires mock harness |
-| QF-015 | 80 | Implement proper undo/redo stack | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Deferred |
+| QF-015 | 80 | Real undo stack in src/undo.zig; integrated into core.zig (GAP-0018) | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Resolved |
 
 ### Deferred (no action needed)
 
@@ -256,7 +255,7 @@
 | [#43](https://gitlab.com/devnw/zig/repl/-/issues/43) | Bug: history.zig file.read() partial read | QF-011 (Resolved) |
 | [#46](https://gitlab.com/devnw/zig/repl/-/issues/46) | Bug: README and doc comments wrong API | QF-020, QF-028, QF-029, QF-021, QF-022 (all Resolved) |
 | [#48](https://gitlab.com/devnw/zig/repl/-/issues/48) | Bug: TerminalWriter.print silently discards >4096 bytes | QF-010, QF-005 (both Resolved) |
-| [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Bug: .undo replaces buffer with kill ring | QF-015 (Deferred), QF-030 (Resolved) |
+| [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Bug: .undo replaces buffer with kill ring | QF-015 (Resolved), QF-030 (Resolved) |
 | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Zero test coverage for core REPL loop | QF-026 (Deferred), QF-025 (Resolved) |
 | [#54](https://gitlab.com/devnw/zig/repl/-/issues/54) | Refactor: deduplicate findWordStart/End and enums | QF-007, QF-008, QF-009 (all Resolved) |
 | [#56](https://gitlab.com/devnw/zig/repl/-/issues/56) | Refactor: processInput complexity | QF-002, QF-003, QF-001 (Resolved), QF-004 (Resolved) |
@@ -276,7 +275,7 @@
 | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1) Set up CI/CD pipeline | QF-048, QF-054 |
 | [#2](https://gitlab.com/devnw/zig/repl/-/issues/2) Add comprehensive unit tests | QF-026, QF-046, QF-047 |
 | [#4](https://gitlab.com/devnw/zig/repl/-/issues/4) Set up test coverage reporting | QF-026 |
-| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) Implement full undo/redo stack | QF-015 |
+| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) Implement full undo/redo stack | QF-015 (Resolved) |
 | [#19](https://gitlab.com/devnw/zig/repl/-/issues/19) Improve signal handling | QF-024 (Resolved), QF-032 (Resolved) |
 | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) Write API documentation | QF-020, QF-021, QF-022 (all Resolved) |
 | [#39](https://gitlab.com/devnw/zig/repl/-/issues/39) Config module disconnected | QF-023 (Resolved), QF-018 (Deferred) |
