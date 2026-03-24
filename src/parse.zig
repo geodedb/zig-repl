@@ -16,9 +16,6 @@ const std = @import("std");
 /// - Semicolon termination (common for many languages)
 /// - Balanced brackets and quotes
 /// - Trailing operators suggesting continuation
-///
-/// For language-specific completion detection, use the
-/// StatementChecker interface.
 pub fn isComplete(input: []const u8) bool {
     // Empty input is complete (no-op)
     if (input.len == 0) return true;
@@ -171,43 +168,11 @@ pub fn needsContinuation(input: []const u8) bool {
     return false;
 }
 
-/// Interface for language-specific statement completion checking.
-pub const StatementChecker = struct {
-    /// Check if the input is complete in the language's syntax.
-    checkFn: *const fn (checker: *const StatementChecker, input: []const u8) bool,
-    context: ?*anyopaque = null,
-
-    pub fn isComplete(self: *const StatementChecker, input: []const u8) bool {
-        return self.checkFn(self, input);
-    }
-};
-
-/// Create a statement checker for semicolon-terminated languages.
-pub fn semicolonTerminatedChecker() StatementChecker {
-    return StatementChecker{
-        .checkFn = struct {
-            fn check(_: *const StatementChecker, input: []const u8) bool {
-                const trimmed = std.mem.trim(u8, input, " \t\n\r");
-                if (trimmed.len == 0) return true;
-                return std.mem.endsWith(u8, trimmed, ";") and isBalanced(input);
-            }
-        }.check,
-    };
-}
-
-/// Create a statement checker that considers input complete when balanced
-/// (for languages like Python where newlines are significant).
-pub fn balancedChecker() StatementChecker {
-    return StatementChecker{
-        .checkFn = struct {
-            fn check(_: *const StatementChecker, input: []const u8) bool {
-                return isBalanced(input) and !needsContinuation(input);
-            }
-        }.check,
-    };
-}
-
 /// Trim trailing whitespace and return the trimmed slice.
+///
+/// This is a consumer-facing API: the REPL core does not call it internally.
+/// Exposed for library users who need lightweight trailing-whitespace removal
+/// without pulling in the full standard-library trim (which requires a charset).
 pub fn trimTrailing(input: []const u8) []const u8 {
     var end = input.len;
     while (end > 0 and std.ascii.isWhitespace(input[end - 1])) {
@@ -217,6 +182,10 @@ pub fn trimTrailing(input: []const u8) []const u8 {
 }
 
 /// Check if input ends with a backslash continuation.
+///
+/// This is a consumer-facing API: the REPL core does not call it internally.
+/// Useful for shell-like REPLs where a trailing backslash indicates the
+/// command continues on the next line.
 pub fn hasBackslashContinuation(input: []const u8) bool {
     const trimmed = trimTrailing(input);
     return trimmed.len > 0 and trimmed[trimmed.len - 1] == '\\';
@@ -286,4 +255,66 @@ test "hasBackslashContinuation" {
     try std.testing.expect(hasBackslashContinuation("line\\"));
     try std.testing.expect(!hasBackslashContinuation("line"));
     try std.testing.expect(!hasBackslashContinuation("line\\n"));
+}
+
+// =============================================================================
+// Fuzz tests -- coverage-guided testing for parser robustness
+// =============================================================================
+
+test "fuzz isBalanced" {
+    try std.testing.fuzz({}, struct {
+        fn testOne(_: void, input: []const u8) anyerror!void {
+            // isBalanced must handle any input without crashing.
+            // The result (true/false) is valid for any byte sequence.
+            _ = isBalanced(input);
+        }
+    }.testOne, .{
+        .corpus = &.{
+            "",
+            "()",
+            "((()))",
+            "([{}])",
+            "\"hello\"",
+            "'hello'",
+            "// comment\n",
+            "/* block */",
+            "(unclosed",
+            "\"unclosed",
+        },
+    });
+}
+
+test "fuzz isComplete" {
+    try std.testing.fuzz({}, struct {
+        fn testOne(_: void, input: []const u8) anyerror!void {
+            // isComplete must handle any input without crashing.
+            _ = isComplete(input);
+        }
+    }.testOne, .{
+        .corpus = &.{
+            "",
+            "SELECT 1;",
+            "hello world",
+            "a +",
+            "func(",
+            "{\"key\": \"value\"}",
+        },
+    });
+}
+
+test "fuzz needsContinuation" {
+    try std.testing.fuzz({}, struct {
+        fn testOne(_: void, input: []const u8) anyerror!void {
+            // needsContinuation must handle any input without crashing.
+            _ = needsContinuation(input);
+        }
+    }.testOne, .{
+        .corpus = &.{
+            "",
+            "a +",
+            "a,",
+            "a \\",
+            "complete",
+        },
+    });
 }

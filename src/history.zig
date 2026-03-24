@@ -12,6 +12,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const text_utils = @import("text_utils.zig");
+const isPathSafe = text_utils.isPathSafe;
 
 /// Manages command history with optional persistence.
 pub const HistoryStore = struct {
@@ -20,7 +22,12 @@ pub const HistoryStore = struct {
     enabled: bool,
     entries: std.ArrayList([]u8),
     max_entries: usize = 5000,
+    /// When true, appending a line removes any earlier duplicate from history
+    /// so that the new entry appears only once, at the end. When false (the
+    /// default), only consecutive duplicates are suppressed.
+    deduplicate_global: bool = false,
     file_mutex: std.Thread.Mutex = .{},
+    dir_ensured: bool = false,
 
     /// Initialize a new history store.
     ///
@@ -71,22 +78,40 @@ pub const HistoryStore = struct {
 
         // Read entire file
         const file_size = try file.getEndPos();
+        const max_history_file_size: u64 = 64 * 1024 * 1024; // 64 MB
+        if (file_size > max_history_file_size) return error.FileTooLarge;
         const content = try self.allocator.alloc(u8, @intCast(file_size));
         defer self.allocator.free(content);
-        _ = try file.read(content);
+        _ = try file.readAll(content);
 
-        // Split into lines
+        // Pre-allocate based on estimated line count to avoid geometric reallocs.
+        // Average history line is ~40 bytes; cap at max_entries to avoid over-allocation.
+        const estimated_lines: usize = @intCast(@min(file_size / 40, self.max_entries));
+        try self.entries.ensureTotalCapacity(self.allocator, estimated_lines);
+
+        // Two-pass approach: count non-empty lines first, then skip early
+        // lines that would exceed max_entries. This avoids allocating strings
+        // that are immediately freed when the file has more lines than the limit.
+        var total_lines: usize = 0;
+        {
+            var count_it = std.mem.tokenizeScalar(u8, content, '\n');
+            while (count_it.next()) |line| {
+                if (line.len > 0) total_lines += 1;
+            }
+        }
+
+        const skip = if (total_lines > self.max_entries) total_lines - self.max_entries else 0;
+
         var it = std.mem.tokenizeScalar(u8, content, '\n');
+        var skipped: usize = 0;
         while (it.next()) |line| {
             if (line.len > 0) {
+                if (skipped < skip) {
+                    skipped += 1;
+                    continue;
+                }
                 const entry = try self.allocator.dupe(u8, line);
                 try self.entries.append(self.allocator, entry);
-
-                // Enforce max entries
-                if (self.entries.items.len > self.max_entries) {
-                    const old = self.entries.orderedRemove(0);
-                    self.allocator.free(old);
-                }
             }
         }
     }
@@ -113,6 +138,20 @@ pub const HistoryStore = struct {
             if (std.mem.eql(u8, last, line)) return;
         }
 
+        // Global deduplication: remove any earlier exact match so the
+        // entry appears only once at the end of history.
+        if (self.deduplicate_global) {
+            var i: usize = 0;
+            while (i < self.entries.items.len) {
+                if (std.mem.eql(u8, self.entries.items[i], line)) {
+                    const removed = self.entries.orderedRemove(i);
+                    self.allocator.free(removed);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
         // Add to memory
         const entry = try self.allocator.dupe(u8, line);
         try self.entries.append(self.allocator, entry);
@@ -128,12 +167,15 @@ pub const HistoryStore = struct {
             self.file_mutex.lock();
             defer self.file_mutex.unlock();
 
-            // Ensure directory exists
-            if (std.fs.path.dirname(path)) |dir| {
-                std.fs.cwd().makePath(dir) catch {};
+            // Ensure directory exists (once per session)
+            if (!self.dir_ensured) {
+                if (std.fs.path.dirname(path)) |dir| {
+                    std.fs.cwd().makePath(dir) catch {};
+                }
+                self.dir_ensured = true;
             }
 
-            const file = std.fs.cwd().createFile(path, .{ .truncate = false }) catch |err| {
+            const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }) catch |err| {
                 // If we can't save history, just continue without persisting
                 if (err == error.FileNotFound) return;
                 return err;
@@ -164,7 +206,7 @@ pub const HistoryStore = struct {
                 std.fs.cwd().makePath(dir) catch {};
             }
 
-            const file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch {
+            const file = std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 }) catch {
                 return;
             };
             file.close();
@@ -213,7 +255,7 @@ pub const HistoryStore = struct {
 /// Get the default history file path for the application.
 ///
 /// Checks in order:
-/// 1. APP_HISTORY environment variable (if app_name provided)
+/// 1. APP_HISTORY environment variable (if app_name provided, validated for safety)
 /// 2. ~/.{app_name}_history (primary)
 /// 3. Platform-specific locations (fallback)
 ///
@@ -227,7 +269,11 @@ pub fn getDefaultHistoryPath(allocator: std.mem.Allocator, app_name: []const u8)
     var full_env_name: [512]u8 = undefined;
     const full_name = std.fmt.bufPrint(&full_env_name, "{s}_HISTORY", .{env_name}) catch app_name;
     if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
-        return path;
+        if (isPathSafe(path)) {
+            return path;
+        }
+        // Path failed validation; free and fall through to defaults
+        allocator.free(path);
     } else |_| {}
 
     // Primary: Try ~/.{app}_history as the default preference
@@ -350,3 +396,179 @@ test "history persistence" {
         try std.testing.expectEqualStrings("line3", hist.entries.items[2]);
     }
 }
+
+test "history load trims excess entries from front in bulk" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_trim.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Write a history file with 10 lines
+    {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+        for (0..10) |i| {
+            var buf: [32]u8 = undefined;
+            const line = std.fmt.bufPrint(&buf, "entry{d}\n", .{i}) catch unreachable;
+            try file.writeAll(line);
+        }
+    }
+
+    // Load with max_entries = 3 -- should keep only the last 3
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        hist.max_entries = 3;
+        try hist.load();
+
+        try std.testing.expect(hist.entries.items.len == 3);
+        try std.testing.expectEqualStrings("entry7", hist.entries.items[0]);
+        try std.testing.expectEqualStrings("entry8", hist.entries.items[1]);
+        try std.testing.expectEqualStrings("entry9", hist.entries.items[2]);
+    }
+}
+
+test "history file permissions are 0o600" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_perms.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Append creates the file with restricted permissions
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.append("secret_command");
+    }
+
+    // Verify file permissions
+    const stat = try std.fs.cwd().statFile(path);
+    // On Linux, mode includes file type bits; mask to permission bits only
+    const perm_bits = stat.mode & 0o777;
+    try std.testing.expect(perm_bits == 0o600);
+}
+
+test "history clear file permissions are 0o600" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_clear_perms.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Create then clear
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.append("line1");
+        try hist.clear();
+    }
+
+    // Verify file permissions after clear
+    const stat = try std.fs.cwd().statFile(path);
+    const perm_bits = stat.mode & 0o777;
+    try std.testing.expect(perm_bits == 0o600);
+}
+
+test "history load rejects file exceeding 64 MB" {
+    // We cannot create a real 64 MB file in a unit test efficiently,
+    // but we can test the boundary by creating a file slightly over
+    // the limit using a sparse file (seek past end).
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_too_large.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Create a sparse file that appears to be > 64 MB
+    {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+        const over_limit: u64 = 64 * 1024 * 1024 + 1;
+        try file.seekTo(over_limit - 1);
+        try file.writeAll("x");
+    }
+
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+
+        const result = hist.load();
+        try std.testing.expectError(error.FileTooLarge, result);
+    }
+}
+
+test "history dir_ensured avoids redundant makePath" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_dir_ensured.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    var hist = try HistoryStore.init(allocator, path, true);
+    defer hist.deinit();
+
+    // Before any append, dir_ensured should be false
+    try std.testing.expect(!hist.dir_ensured);
+
+    try hist.append("first");
+    // After first append, dir_ensured should be true
+    try std.testing.expect(hist.dir_ensured);
+
+    // Subsequent appends should still work with dir_ensured = true
+    try hist.append("second");
+    try std.testing.expect(hist.dir_ensured);
+    try std.testing.expect(hist.entries.items.len == 2);
+}
+
+test "history global deduplication removes earlier duplicates" {
+    const allocator = std.testing.allocator;
+
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    hist.deduplicate_global = true;
+
+    try hist.append("alpha");
+    try hist.append("beta");
+    try hist.append("gamma");
+    try hist.append("alpha"); // should remove the earlier "alpha"
+
+    try std.testing.expectEqual(@as(usize, 3), hist.entries.items.len);
+    try std.testing.expectEqualStrings("beta", hist.entries.items[0]);
+    try std.testing.expectEqualStrings("gamma", hist.entries.items[1]);
+    try std.testing.expectEqualStrings("alpha", hist.entries.items[2]);
+}
+
+test "history global deduplication off preserves non-consecutive duplicates" {
+    const allocator = std.testing.allocator;
+
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    // deduplicate_global defaults to false
+
+    try hist.append("alpha");
+    try hist.append("beta");
+    try hist.append("alpha"); // non-consecutive, kept when global dedup is off
+
+    try std.testing.expectEqual(@as(usize, 3), hist.entries.items.len);
+    try std.testing.expectEqualStrings("alpha", hist.entries.items[0]);
+    try std.testing.expectEqualStrings("beta", hist.entries.items[1]);
+    try std.testing.expectEqualStrings("alpha", hist.entries.items[2]);
+}
+
+test "history global deduplication handles multiple duplicates" {
+    const allocator = std.testing.allocator;
+
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    hist.deduplicate_global = true;
+
+    try hist.append("x");
+    try hist.append("y");
+    try hist.append("x");
+    try hist.append("z");
+    try hist.append("x"); // two earlier "x" entries should be removed
+
+    try std.testing.expectEqual(@as(usize, 3), hist.entries.items.len);
+    try std.testing.expectEqualStrings("y", hist.entries.items[0]);
+    try std.testing.expectEqualStrings("z", hist.entries.items[1]);
+    try std.testing.expectEqualStrings("x", hist.entries.items[2]);
+}
+
+// isPathSafe tests are in text_utils.zig (canonical location)

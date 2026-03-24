@@ -11,12 +11,38 @@
 
 const std = @import("std");
 const core = @import("core.zig");
+const text_utils = @import("text_utils.zig");
 
-/// Vi editing mode
+const findWordStart = text_utils.findWordStart;
+const findWordEnd = text_utils.findWordEnd;
+
+/// Find the position one past the end of the current word (Vi `e` motion semantics).
+///
+/// Unlike `findWordEnd` (which skips past trailing whitespace to the start of
+/// the next word), this function stops at the last character of the current
+/// word. If the cursor is already on a non-whitespace character, it finds the
+/// end of that word. Returns the position one past the last character of the
+/// word (suitable for use with `replaceRange`).
+///
+/// This is the shared implementation backing both the `e` motion and the `de`
+/// operator, eliminating the duplication noted in QF-043.
+fn findEndOfWord(buffer: []const u8, start: usize) usize {
+    var i = start;
+    if (i < buffer.len and !std.ascii.isWhitespace(buffer[i])) {
+        while (i + 1 < buffer.len and !std.ascii.isWhitespace(buffer[i + 1])) : (i += 1) {}
+        i += 1;
+    }
+    return i;
+}
+
+/// Vi editing mode.
+///
+/// Visual mode is not yet implemented. When added it will likely require
+/// selection-range tracking and its own handler; for now only normal and
+/// insert modes are supported.
 pub const ViMode = enum {
     normal,
     insert,
-    visual,
 };
 
 /// Handle a key event in Vi mode.
@@ -24,7 +50,6 @@ pub fn handleKey(state: anytype, key: core.KeyEvent) core.KeyAction {
     switch (state.vi_mode) {
         .normal => return handleNormalMode(state, key),
         .insert => return handleInsertMode(state, key),
-        .visual => return handleNormalMode(state, key), // Simplified: treat as normal
     }
 }
 
@@ -63,6 +88,12 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         };
     }
 
+    // Handle pending operators before normal commands so that e.g. 'rx' replaces
+    // the character at cursor instead of triggering 'x' (delete_char_forward).
+    if (state.pending_operator != null) {
+        if (handlePendingOperator(state, key)) |action| return action;
+    }
+
     // Vi normal mode commands
     switch (key.key) {
         // Mode changes
@@ -88,12 +119,14 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         'o' => {
             state.vi_mode = .insert;
             state.cursor = state.buffer.items.len;
+            // Alloc failure is non-critical: cursor stays at end, user sees no newline
             state.buffer.append(state.allocator, '\n') catch {};
             state.cursor += 1;
             return .vi_insert_mode;
         },
         'O' => {
             state.vi_mode = .insert;
+            // Alloc failure is non-critical: cursor stays at 0, user sees no newline
             state.buffer.insert(state.allocator, 0, '\n') catch {};
             state.cursor = 0;
             return .vi_insert_mode;
@@ -110,12 +143,11 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         'w' => return .move_word_right,
         'b' => return .move_word_left,
         'e' => {
-            // Move to end of word
-            var i = state.cursor;
-            if (i < state.buffer.items.len and !std.ascii.isWhitespace(state.buffer.items[i])) {
-                while (i < state.buffer.items.len - 1 and !std.ascii.isWhitespace(state.buffer.items[i + 1])) : (i += 1) {}
+            // Move to end of word (last char, not one past)
+            const end = findEndOfWord(state.buffer.items, state.cursor);
+            if (end > state.cursor) {
+                state.cursor = end - 1;
             }
-            state.cursor = i;
             return .none;
         },
 
@@ -177,113 +209,117 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         else => {},
     }
 
-    // Handle pending operators
-    if (state.pending_operator) |op| {
-        if (op == 'd') {
-            switch (key.key) {
-                'd' => {
-                    // dd: delete line
-                    state.kill_ring.clearRetainingCapacity();
-                    state.kill_ring.appendSlice(state.allocator, state.buffer.items) catch {};
-                    state.buffer.clearRetainingCapacity();
-                    state.cursor = 0;
-                    state.last_was_kill = true;
-                    state.pending_operator = null;
-                    return .none;
-                },
-                'w' => {
-                    // dw: delete word
-                    const end = findWordEnd(state.buffer.items, state.cursor);
-                    state.kill_ring.clearRetainingCapacity();
-                    state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                    while (state.cursor < end) {
-                        _ = state.buffer.orderedRemove(state.cursor);
-                    }
-                    state.last_was_kill = true;
-                    state.pending_operator = null;
-                    return .none;
-                },
-                'b' => {
-                    // db: delete word backward
-                    const start = findWordStart(state.buffer.items, state.cursor);
-                    state.kill_ring.clearRetainingCapacity();
-                    state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
-                    while (state.cursor > start) {
-                        state.cursor -= 1;
-                        _ = state.buffer.orderedRemove(state.cursor);
-                    }
-                    state.last_was_kill = true;
-                    state.pending_operator = null;
-                    return .none;
-                },
-                'e' => {
-                    // de: delete to end of word
-                    var end = state.cursor;
-                    if (end < state.buffer.items.len and !std.ascii.isWhitespace(state.buffer.items[end])) {
-                        while (end < state.buffer.items.len - 1 and !std.ascii.isWhitespace(state.buffer.items[end + 1])) : (end += 1) {}
-                        end += 1;
-                    }
-                    state.kill_ring.clearRetainingCapacity();
-                    state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                    while (state.cursor < end) {
-                        _ = state.buffer.orderedRemove(state.cursor);
-                    }
-                    state.last_was_kill = true;
-                    state.pending_operator = null;
-                    return .none;
-                },
-                '$' => {
-                    // d$: delete to end of line (same as D)
-                    state.pending_operator = null;
-                    return .delete_to_eol;
-                },
-                '0' => {
-                    // d0: delete to beginning of line
-                    state.pending_operator = null;
-                    return .delete_to_bol;
-                },
-                else => {
-                    state.pending_operator = null;
-                },
-            }
-        } else if (op == 'c') {
-            // Change operator - like delete but enter insert mode
-            state.vi_mode = .insert;
-            switch (key.key) {
-                'c' => {
-                    // cc: change line
-                    state.buffer.clearRetainingCapacity();
-                    state.cursor = 0;
-                    state.pending_operator = null;
-                    return .vi_insert_mode;
-                },
-                'w' => {
-                    // cw: change word
-                    state.pending_operator = null;
-                    return .delete_word;
-                },
-                '$' => {
-                    state.pending_operator = null;
-                    return .delete_to_eol;
-                },
-                else => {
-                    state.pending_operator = null;
-                    state.vi_mode = .normal;
-                },
-            }
-        } else if (op == 'r') {
-            // Replace with the typed character
-            if (key.key >= 0x20 and key.key < 0x7f) {
-                if (state.cursor < state.buffer.items.len) {
-                    state.buffer.items[state.cursor] = key.key;
-                }
-            }
-            state.pending_operator = null;
-            return .none;
+    return .none;
+}
+
+/// Handle a pending Vi operator (d, c, r) applied to the next key.
+///
+/// Returns the resulting `KeyAction` if the operator consumed the key,
+/// or `null` if the key was unrecognized for this operator (the caller
+/// should fall through to normal mode command handling).
+fn handlePendingOperator(state: anytype, key: core.KeyEvent) ?core.KeyAction {
+    const op = state.pending_operator orelse return null;
+
+    if (op == 'd') {
+        switch (key.key) {
+            'd' => {
+                // dd: delete line
+                // Kill ring alloc failures are non-critical: delete still works, yank-back won't have data
+                state.kill_ring.clearRetainingCapacity();
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items) catch {};
+                state.buffer.clearRetainingCapacity();
+                state.cursor = 0;
+                state.last_was_kill = true;
+                state.pending_operator = null;
+                return .none;
+            },
+            'w' => {
+                // dw: delete word — single O(n) replaceRange instead of O(n*w) orderedRemove loop
+                const end = findWordEnd(state.buffer.items, state.cursor);
+                state.kill_ring.clearRetainingCapacity();
+                // Kill ring alloc failures are non-critical: delete still works, yank-back won't have data
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
+                state.last_was_kill = true;
+                state.pending_operator = null;
+                return .none;
+            },
+            'b' => {
+                // db: delete word backward — single O(n) replaceRange
+                const start = findWordStart(state.buffer.items, state.cursor);
+                state.kill_ring.clearRetainingCapacity();
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
+                state.buffer.replaceRange(state.allocator, start, state.cursor - start, &.{}) catch {};
+                state.cursor = start;
+                state.last_was_kill = true;
+                state.pending_operator = null;
+                return .none;
+            },
+            'e' => {
+                // de: delete to end of word — single O(n) replaceRange
+                const end = findEndOfWord(state.buffer.items, state.cursor);
+                state.kill_ring.clearRetainingCapacity();
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
+                state.last_was_kill = true;
+                state.pending_operator = null;
+                return .none;
+            },
+            '$' => {
+                // d$: delete to end of line (same as D)
+                state.pending_operator = null;
+                return .delete_to_eol;
+            },
+            '0' => {
+                // d0: delete to beginning of line
+                state.pending_operator = null;
+                return .delete_to_bol;
+            },
+            else => {
+                state.pending_operator = null;
+                return null;
+            },
         }
+    } else if (op == 'c') {
+        // Change operator - like delete but enter insert mode
+        state.vi_mode = .insert;
+        switch (key.key) {
+            'c' => {
+                // cc: change line
+                state.buffer.clearRetainingCapacity();
+                state.cursor = 0;
+                state.pending_operator = null;
+                return .vi_insert_mode;
+            },
+            'w' => {
+                // cw: change word
+                state.pending_operator = null;
+                return .delete_word;
+            },
+            '$' => {
+                state.pending_operator = null;
+                return .delete_to_eol;
+            },
+            else => {
+                state.pending_operator = null;
+                state.vi_mode = .normal;
+                return null;
+            },
+        }
+    } else if (op == 'r') {
+        // Replace with the typed character
+        if (key.key >= 0x20 and key.key < 0x7f) {
+            if (state.cursor < state.buffer.items.len) {
+                state.buffer.items[state.cursor] = key.key;
+            }
+        }
+        state.pending_operator = null;
+        return .none;
     }
 
-    return .none;
+    // Unknown operator -- clear and fall through
+    state.pending_operator = null;
+    return null;
 }
 
 fn handleInsertMode(state: anytype, key: core.KeyEvent) core.KeyAction {
@@ -356,29 +392,368 @@ fn handleInsertMode(state: anytype, key: core.KeyEvent) core.KeyAction {
     };
 }
 
-fn findWordStart(text: []const u8, pos: usize) usize {
-    if (pos == 0) return 0;
-    var i = pos;
+// findWordStart and findWordEnd imported from text_utils.zig (see top of file)
 
-    while (i > 0 and std.ascii.isWhitespace(text[i - 1])) : (i -= 1) {}
-    while (i > 0 and !std.ascii.isWhitespace(text[i - 1])) : (i -= 1) {}
+// =============================================================================
+// Test support: mock state struct satisfying the `anytype` interface for Vi
+//
+// This TestState is intentionally separate from the one in keymap_emacs.zig.
+// It carries Vi-specific fields (vi_mode, pending_operator, kill_ring,
+// last_was_kill) that the Emacs version does not need. Merging them would
+// couple Emacs tests to Vi internals with no benefit.
+// =============================================================================
 
-    return i;
+const TestState = struct {
+    buffer: std.ArrayList(u8),
+    cursor: usize,
+    allocator: std.mem.Allocator,
+    vi_mode: ViMode,
+    pending_operator: ?u8,
+    kill_ring: std.ArrayList(u8),
+    last_was_kill: bool,
+
+    fn initWithContent(allocator: std.mem.Allocator, content: []const u8) !TestState {
+        var buf = try std.ArrayList(u8).initCapacity(allocator, content.len);
+        try buf.appendSlice(allocator, content);
+        return .{
+            .buffer = buf,
+            .cursor = 0,
+            .allocator = allocator,
+            .vi_mode = .normal,
+            .pending_operator = null,
+            .kill_ring = try std.ArrayList(u8).initCapacity(allocator, 0),
+            .last_was_kill = false,
+        };
+    }
+
+    fn deinit(self: *TestState) void {
+        self.buffer.deinit(self.allocator);
+        self.kill_ring.deinit(self.allocator);
+    }
+};
+
+test "vi normal h returns move_left" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 3;
+
+    const action = handleKey(&state, .{ .key = 'h' });
+    try std.testing.expectEqual(core.KeyAction.move_left, action);
 }
 
-fn findWordEnd(text: []const u8, pos: usize) usize {
-    if (pos >= text.len) return text.len;
-    var i = pos;
+test "vi normal l returns move_right" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 1;
 
-    while (i < text.len and !std.ascii.isWhitespace(text[i])) : (i += 1) {}
-    while (i < text.len and std.ascii.isWhitespace(text[i])) : (i += 1) {}
-
-    return i;
+    const action = handleKey(&state, .{ .key = 'l' });
+    try std.testing.expectEqual(core.KeyAction.move_right, action);
 }
 
-test "vi mode transitions" {
-    // This would need a mock state to test properly
-    // For now, just ensure it compiles
-    _ = handleKey;
-    _ = ViMode.normal;
+test "vi normal i enters insert mode" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    const action = handleKey(&state, .{ .key = 'i' });
+    try std.testing.expectEqual(core.KeyAction.vi_insert_mode, action);
+    try std.testing.expectEqual(ViMode.insert, state.vi_mode);
+}
+
+test "vi normal $ returns move_eol" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 3;
+
+    const action = handleKey(&state, .{ .key = '$' });
+    try std.testing.expectEqual(core.KeyAction.move_eol, action);
+}
+
+test "vi normal 0 returns move_bol" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 5;
+
+    const action = handleKey(&state, .{ .key = '0' });
+    try std.testing.expectEqual(core.KeyAction.move_bol, action);
+}
+
+test "vi normal w returns move_word_right" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 0;
+
+    const action = handleKey(&state, .{ .key = 'w' });
+    try std.testing.expectEqual(core.KeyAction.move_word_right, action);
+}
+
+test "vi normal b returns move_word_left" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 8;
+
+    const action = handleKey(&state, .{ .key = 'b' });
+    try std.testing.expectEqual(core.KeyAction.move_word_left, action);
+}
+
+test "vi normal x returns delete_char_forward" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    const action = handleKey(&state, .{ .key = 'x' });
+    try std.testing.expectEqual(core.KeyAction.delete_char_forward, action);
+}
+
+test "vi normal D returns delete_to_eol" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 5;
+
+    const action = handleKey(&state, .{ .key = 'D' });
+    try std.testing.expectEqual(core.KeyAction.delete_to_eol, action);
+}
+
+test "vi normal d sets pending operator" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 3;
+
+    // 'd' sets pending_operator
+    const action = handleKey(&state, .{ .key = 'd' });
+    try std.testing.expectEqual(core.KeyAction.none, action);
+    try std.testing.expectEqual(@as(?u8, 'd'), state.pending_operator);
+}
+
+test "vi pending d with unhandled key clears operator via else" {
+    // The pending operator handler runs for keys not in the normal mode switch.
+    // Explicitly set pending_operator and send an unmatched key (e.g., 'z').
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 3;
+    state.pending_operator = 'd';
+
+    // 'z' is not in the normal switch, so falls to else => {} then pending handler
+    // But 'd' pending with 'z' hits the else in the pending handler which clears it
+    const action = handleKey(&state, .{ .key = 'z' });
+    try std.testing.expectEqual(core.KeyAction.none, action);
+    try std.testing.expectEqual(@as(?u8, null), state.pending_operator);
+}
+
+test "vi pending d with dollar sign deletes to eol" {
+    // '$' is handled in the normal mode switch and returns immediately.
+    // The pending operator handler is unreachable for '$'.
+    // Instead, pre-set pending_operator and use a key not in the switch.
+    // Actually, '$' IS in the switch and returns .move_eol immediately.
+    // So d$ through handleKey returns .move_eol for the second key.
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 3;
+
+    // Set pending operator
+    _ = handleKey(&state, .{ .key = 'd' });
+    try std.testing.expectEqual(@as(?u8, 'd'), state.pending_operator);
+
+    // '$' with pending 'd' operator returns .delete_to_eol
+    const action2 = handleKey(&state, .{ .key = '$' });
+    try std.testing.expectEqual(core.KeyAction.delete_to_eol, action2);
+}
+
+test "vi insert Escape returns to normal mode" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.vi_mode = .insert;
+    state.cursor = 3;
+
+    const action = handleKey(&state, .{ .key = 0x1b });
+    try std.testing.expectEqual(core.KeyAction.vi_normal_mode, action);
+    try std.testing.expectEqual(ViMode.normal, state.vi_mode);
+    // Cursor moves back one position on ESC in vi
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "vi insert mode character insertion" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hllo");
+    defer state.deinit();
+    state.vi_mode = .insert;
+    state.cursor = 1;
+
+    const action = handleKey(&state, .{ .key = 'e' });
+    try std.testing.expectEqual(core.KeyAction.insert, action);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "vi normal A enters insert mode at end of line" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    const action = handleKey(&state, .{ .key = 'A' });
+    try std.testing.expectEqual(core.KeyAction.vi_insert_mode, action);
+    try std.testing.expectEqual(ViMode.insert, state.vi_mode);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+}
+
+test "vi normal I enters insert mode at beginning" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 3;
+
+    const action = handleKey(&state, .{ .key = 'I' });
+    try std.testing.expectEqual(core.KeyAction.vi_insert_mode, action);
+    try std.testing.expectEqual(ViMode.insert, state.vi_mode);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+}
+
+test "vi normal j returns history_next" {
+    var state = try TestState.initWithContent(std.testing.allocator, "");
+    defer state.deinit();
+
+    const action = handleKey(&state, .{ .key = 'j' });
+    try std.testing.expectEqual(core.KeyAction.history_next, action);
+}
+
+test "vi normal k returns history_prev" {
+    var state = try TestState.initWithContent(std.testing.allocator, "");
+    defer state.deinit();
+
+    const action = handleKey(&state, .{ .key = 'k' });
+    try std.testing.expectEqual(core.KeyAction.history_prev, action);
+}
+
+test "vi normal u returns undo" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+
+    const action = handleKey(&state, .{ .key = 'u' });
+    try std.testing.expectEqual(core.KeyAction.undo, action);
+}
+
+test "vi normal p returns yank" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+
+    const action = handleKey(&state, .{ .key = 'p' });
+    try std.testing.expectEqual(core.KeyAction.yank, action);
+}
+
+test "vi insert Ctrl+C returns cancel and enters normal mode" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.vi_mode = .insert;
+
+    const action = handleKey(&state, .{ .key = 'c', .ctrl = true });
+    try std.testing.expectEqual(core.KeyAction.cancel, action);
+    try std.testing.expectEqual(ViMode.normal, state.vi_mode);
+}
+
+test "vi insert backspace returns backspace" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.vi_mode = .insert;
+    state.cursor = 3;
+
+    const action = handleKey(&state, .{ .key = 0x7f });
+    try std.testing.expectEqual(core.KeyAction.backspace, action);
+}
+
+test "vi normal C enters insert mode and returns delete_to_eol" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 5;
+
+    const action = handleKey(&state, .{ .key = 'C' });
+    try std.testing.expectEqual(core.KeyAction.delete_to_eol, action);
+    try std.testing.expectEqual(ViMode.insert, state.vi_mode);
+}
+
+test "vi normal r sets pending operator for replace" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 1;
+
+    // First 'r' sets pending operator
+    const action1 = handleKey(&state, .{ .key = 'r' });
+    try std.testing.expectEqual(core.KeyAction.none, action1);
+    try std.testing.expectEqual(@as(?u8, 'r'), state.pending_operator);
+
+    // Typing 'x' replaces character at cursor
+    const action2 = handleKey(&state, .{ .key = 'x' });
+    try std.testing.expectEqual(core.KeyAction.none, action2);
+    try std.testing.expectEqual(@as(u8, 'x'), state.buffer.items[1]);
+    try std.testing.expectEqual(@as(?u8, null), state.pending_operator);
+}
+
+// =============================================================================
+// findEndOfWord helper tests (QF-043)
+// =============================================================================
+
+test "findEndOfWord at start of single word returns one past end" {
+    const buf = "hello";
+    try std.testing.expectEqual(@as(usize, 5), findEndOfWord(buf, 0));
+}
+
+test "findEndOfWord at middle of word returns one past end" {
+    const buf = "hello world";
+    try std.testing.expectEqual(@as(usize, 5), findEndOfWord(buf, 2));
+}
+
+test "findEndOfWord on whitespace returns same position" {
+    const buf = "hello world";
+    try std.testing.expectEqual(@as(usize, 5), findEndOfWord(buf, 5));
+}
+
+test "findEndOfWord on second word" {
+    const buf = "hello world";
+    try std.testing.expectEqual(@as(usize, 11), findEndOfWord(buf, 6));
+}
+
+test "findEndOfWord with empty buffer" {
+    try std.testing.expectEqual(@as(usize, 0), findEndOfWord("", 0));
+}
+
+test "findEndOfWord at end of buffer" {
+    const buf = "hello";
+    try std.testing.expectEqual(@as(usize, 5), findEndOfWord(buf, 5));
+}
+
+test "vi normal e motion moves cursor to last char of word" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 0;
+
+    _ = handleKey(&state, .{ .key = 'e' });
+    try std.testing.expectEqual(@as(usize, 4), state.cursor); // 'o' in "hello"
+}
+
+test "vi normal e motion on whitespace stays put" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 5; // on the space
+
+    _ = handleKey(&state, .{ .key = 'e' });
+    try std.testing.expectEqual(@as(usize, 5), state.cursor); // no change
+}
+
+test "vi de operator deletes to end of word" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 0;
+    state.pending_operator = 'd';
+
+    _ = handleKey(&state, .{ .key = 'e' });
+    try std.testing.expectEqualStrings(" world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+}
+
+test "vi de operator from middle of word" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello world");
+    defer state.deinit();
+    state.cursor = 2;
+    state.pending_operator = 'd';
+
+    _ = handleKey(&state, .{ .key = 'e' });
+    try std.testing.expectEqualStrings("he world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
 }

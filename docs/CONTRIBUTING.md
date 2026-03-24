@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 
 ### Prerequisites
 
-- [Zig](https://ziglang.org/download/) (0.11.0 or later)
+- [Zig](https://ziglang.org/download/) (0.14.0 or later)
 - Git
 - A terminal emulator for testing
 
@@ -112,23 +112,37 @@ Prefix commits with:
 ```
 repl/
 ├── src/
-│   ├── core.zig        # Main REPL implementation
-│   ├── history.zig     # Command history
-│   ├── completion.zig  # Tab completion
-│   ├── parse.zig       # Input parsing utilities
-│   ├── platform.zig    # Platform abstraction
+│   ├── core.zig         # Main REPL implementation
+│   ├── repl.zig         # Public API root (re-exports for consumers)
+│   ├── input.zig        # Terminal input parsing (ANSI/control sequences)
+│   ├── render.zig       # Rendering calculation utilities
+│   ├── search.zig       # Interactive reverse-incremental search
+│   ├── history.zig      # Command history
+│   ├── completion.zig   # Tab completion
+│   ├── parse.zig        # Input parsing utilities
+│   ├── platform.zig     # Platform abstraction
 │   ├── keymap_emacs.zig # Emacs keybindings
-│   ├── keymap_vi.zig   # Vi keybindings
-│   ├── config.zig      # Configuration types
-│   └── example.zig     # Example application
+│   ├── keymap_vi.zig    # Vi keybindings
+│   ├── config.zig       # Configuration types
+│   ├── text_utils.zig   # Shared text helpers (word boundaries, sanitization)
+│   └── example.zig      # Example application
+├── examples/
+│   ├── basic.zig        # Basic REPL usage
+│   ├── calculator.zig   # Calculator example
+│   ├── colors.zig       # Color output example
+│   ├── completions.zig  # Tab completion example
+│   ├── history.zig      # History usage example
+│   ├── multiline.zig    # Multi-line input example
+│   ├── shell.zig        # Shell-like REPL example
+│   └── vi_mode.zig      # Vi keybinding example
 ├── tests/
-│   └── integration.zig # Integration tests
+│   └── integration.zig  # Integration tests
 ├── docs/
-│   ├── ROADMAP.md      # Project roadmap
-│   ├── CONTRIBUTING.md # This file
-│   └── ARCHITECTURE.md # Architecture overview
-├── build.zig           # Build configuration
-└── README.md           # Project overview
+│   ├── ROADMAP.md       # Project roadmap
+│   ├── CONTRIBUTING.md  # This file
+│   └── ARCHITECTURE.md  # Architecture overview
+├── build.zig            # Build configuration
+└── README.md            # Project overview
 ```
 
 ## Issue Tracking
@@ -155,4 +169,4 @@ Be respectful and constructive in all interactions. We welcome contributors of a
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Apache License, Version 2.0.

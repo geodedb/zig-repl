@@ -8,6 +8,84 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// =============================================================================
+// Signal-based terminal cleanup (POSIX only)
+// =============================================================================
+//
+// When raw terminal mode is active (ISIG disabled), external signals such as
+// SIGTERM and SIGHUP would leave the terminal in raw mode because the normal
+// `defer restoreTerminalMode(...)` in core.zig cannot run during
+// signal-based termination.  We register one-shot signal handlers that
+// restore the original termios before re-raising the signal so the process
+// terminates with the correct exit status.
+
+/// Saved original terminal state for signal-handler restoration.
+/// Written by `enterRawMode`, cleared by `restoreTerminalMode`.
+/// Only used on POSIX targets; on Windows this is a no-op void.
+var saved_termios: if (builtin.os.tag == .windows) void else ?std.posix.termios =
+    if (builtin.os.tag == .windows) {} else null;
+
+/// Signal handler that restores the terminal to its original state and
+/// then re-raises the received signal with the default disposition so
+/// the process exits with the standard signal semantics (correct exit
+/// code / core dump).
+///
+/// Async-signal-safety: only uses raw syscalls via `std.os.linux` and
+/// does not allocate or acquire locks.
+fn handleTerminalSignal(sig: i32) callconv(.c) void {
+    if (builtin.os.tag == .windows) return;
+
+    // Restore original terminal attributes via the raw syscall (async-signal-safe).
+    if (saved_termios) |original| {
+        _ = std.os.linux.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
+    }
+
+    // Also attempt to disable bracketed paste mode.
+    // write() is async-signal-safe per POSIX.
+    _ = std.os.linux.write(std.posix.STDOUT_FILENO, "\x1b[?2004l", 8);
+
+    // Reset this signal to SIG_DFL and re-raise so the process exits
+    // with the correct signal disposition (e.g. exit code 128+sig).
+    const default_sa = std.posix.Sigaction{
+        .handler = .{ .handler = std.posix.SIG.DFL },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(@intCast(sig), &default_sa, null);
+    _ = std.os.linux.kill(std.os.linux.getpid(), sig);
+}
+
+/// Register signal handlers for terminal cleanup on the given signals.
+/// Called from `enterRawMode` after saving the original terminal state.
+fn installTerminalSignalHandlers() void {
+    if (builtin.os.tag == .windows) return;
+
+    const sa = std.posix.Sigaction{
+        .handler = .{ .handler = handleTerminalSignal },
+        .mask = std.posix.sigemptyset(),
+        // SA_RESETHAND: one-shot handler to avoid re-entry.
+        .flags = std.posix.SA.RESETHAND,
+    };
+
+    std.posix.sigaction(std.posix.SIG.TERM, &sa, null);
+    std.posix.sigaction(std.posix.SIG.HUP, &sa, null);
+}
+
+/// Remove the terminal signal handlers (restore default behavior).
+/// Called from `restoreTerminalMode` when we no longer need cleanup.
+fn removeTerminalSignalHandlers() void {
+    if (builtin.os.tag == .windows) return;
+
+    const default_sa = std.posix.Sigaction{
+        .handler = .{ .handler = std.posix.SIG.DFL },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    std.posix.sigaction(std.posix.SIG.TERM, &default_sa, null);
+    std.posix.sigaction(std.posix.SIG.HUP, &default_sa, null);
+}
+
 /// Get a handle to standard input.
 /// Works on both POSIX systems and Windows.
 pub fn getStdinHandle() std.fs.File {
@@ -111,6 +189,10 @@ pub fn enterRawMode() !TerminalState {
 
     try std.posix.tcsetattr(stdin.handle, .FLUSH, raw);
 
+    // Save original state for signal handler restoration and install handlers.
+    saved_termios = original;
+    installTerminalSignalHandlers();
+
     // Enable bracketed paste mode
     const stdout = getStdoutHandle();
     try stdout.writeAll("\x1b[?2004h");
@@ -132,6 +214,10 @@ pub fn restoreTerminalMode(original: TerminalState) !void {
 
     const stdin = getStdinHandle();
     try std.posix.tcsetattr(stdin.handle, .FLUSH, original);
+
+    // Remove signal handlers and clear saved state now that terminal is restored.
+    removeTerminalSignalHandlers();
+    saved_termios = null;
 }
 
 /// Get terminal width in columns.
@@ -281,24 +367,35 @@ pub const TerminalWriter = struct {
         return init(getStderrHandle());
     }
 
+    /// Size of the stack buffer used for newline conversion in `write`.
+    const WRITE_BUF_SIZE = 8192;
+
     /// Write a string, converting \n to \r\n for raw terminal mode.
+    /// Buffers the converted output and flushes in as few writeAll calls
+    /// as possible (typically one) instead of issuing a separate syscall
+    /// per text segment and newline.
     pub fn write(self: Self, data: []const u8) !void {
-        var start: usize = 0;
-        for (data, 0..) |c, i| {
+        var buf: [WRITE_BUF_SIZE]u8 = undefined;
+        var pos: usize = 0;
+        for (data) |c| {
             if (c == '\n') {
-                // Write everything up to (but not including) the \n
-                if (i > start) {
-                    try self.file.writeAll(data[start..i]);
+                if (pos + 2 > buf.len) {
+                    try self.file.writeAll(buf[0..pos]);
+                    pos = 0;
                 }
-                // Write \r\n instead of just \n
-                try self.file.writeAll("\r\n");
-                start = i + 1;
+                buf[pos] = '\r';
+                buf[pos + 1] = '\n';
+                pos += 2;
+            } else {
+                if (pos + 1 > buf.len) {
+                    try self.file.writeAll(buf[0..pos]);
+                    pos = 0;
+                }
+                buf[pos] = c;
+                pos += 1;
             }
         }
-        // Write any remaining data after the last \n
-        if (start < data.len) {
-            try self.file.writeAll(data[start..]);
-        }
+        if (pos > 0) try self.file.writeAll(buf[0..pos]);
     }
 
     /// Write a string followed by a newline (converted to \r\n).
@@ -307,12 +404,22 @@ pub const TerminalWriter = struct {
         try self.file.writeAll("\r\n");
     }
 
+    /// Size of the stack buffer used by `print`. Extracted as a named constant
+    /// so callers can reason about the truncation threshold.
+    const PRINT_BUF_SIZE = 4096;
+
     /// Print formatted output, converting \n to \r\n.
+    /// If the formatted output exceeds `PRINT_BUF_SIZE`, writes the partial
+    /// content that fits rather than silently dropping all output.
     pub fn print(self: Self, comptime fmt: []const u8, args: anytype) !void {
-        var buf: [4096]u8 = undefined;
-        const formatted = std.fmt.bufPrint(&buf, fmt, args) catch {
-            // Buffer too small - this is rare, just truncate
-            return;
+        var buf: [PRINT_BUF_SIZE]u8 = undefined;
+        const formatted = std.fmt.bufPrint(&buf, fmt, args) catch |err| switch (err) {
+            error.NoSpaceLeft => {
+                // Buffer too small -- write everything that fits rather than
+                // silently discarding all output.
+                try self.write(&buf);
+                return;
+            },
         };
         try self.write(formatted);
     }
@@ -346,20 +453,24 @@ pub const TerminalWriter = struct {
     // ========================================================================
 
     /// Set the foreground color. Only applies if color is enabled.
+    /// Composes the full ANSI sequence in a stack buffer so only one
+    /// writeAll syscall is needed instead of three.
     pub fn setColor(self: Self, color: Color) !void {
         if (self.use_color) {
-            try self.file.writeAll("\x1b[");
-            try self.file.writeAll(color.code());
-            try self.file.writeAll("m");
+            var buf: [16]u8 = undefined;
+            const seq = std.fmt.bufPrint(&buf, "\x1b[{s}m", .{color.code()}) catch return;
+            try self.file.writeAll(seq);
         }
     }
 
     /// Set text style (bold, underline, etc). Only applies if color is enabled.
+    /// Composes the full ANSI sequence in a stack buffer so only one
+    /// writeAll syscall is needed instead of three.
     pub fn setStyle(self: Self, style: Style) !void {
         if (self.use_color) {
-            try self.file.writeAll("\x1b[");
-            try self.file.writeAll(style.code());
-            try self.file.writeAll("m");
+            var buf: [16]u8 = undefined;
+            const seq = std.fmt.bufPrint(&buf, "\x1b[{s}m", .{style.code()}) catch return;
+            try self.file.writeAll(seq);
         }
     }
 
@@ -439,14 +550,12 @@ pub fn terminalWriter() TerminalWriter {
 }
 
 test "platform handles" {
-    // Just verify these don't crash
     _ = getStdinHandle();
     _ = getStdoutHandle();
     _ = getStderrHandle();
 }
 
 test "tty detection" {
-    // These may return true or false depending on test environment
     _ = isStdinTty();
     _ = isStdoutTty();
     _ = isStderrTty();
@@ -460,7 +569,6 @@ test "terminal dimensions" {
 }
 
 test "terminal writer newline conversion" {
-    // Test the conversion logic used in TerminalWriter
     const convertNewlines = struct {
         fn convert(data: []const u8, buf: []u8) []const u8 {
             var out_idx: usize = 0;
@@ -480,24 +588,209 @@ test "terminal writer newline conversion" {
     };
 
     var buf: [256]u8 = undefined;
-
-    // Test basic newline conversion
     const result1 = convertNewlines.convert("hello\nworld\n", &buf);
     try std.testing.expectEqualStrings("hello\r\nworld\r\n", result1);
-
-    // Test no newlines
     const result2 = convertNewlines.convert("no newlines", &buf);
     try std.testing.expectEqualStrings("no newlines", result2);
-
-    // Test multiple consecutive newlines
     const result3 = convertNewlines.convert("a\n\nb", &buf);
     try std.testing.expectEqualStrings("a\r\n\r\nb", result3);
-
-    // Test empty string
     const result4 = convertNewlines.convert("", &buf);
     try std.testing.expectEqualStrings("", result4);
-
-    // Test newline at start
     const result5 = convertNewlines.convert("\nstart", &buf);
     try std.testing.expectEqualStrings("\r\nstart", result5);
+}
+
+/// Helper: create a TerminalWriter backed by a temporary file for testing,
+/// then read back everything that was written. Color is disabled so that
+/// test assertions do not depend on the test runner's TTY status.
+fn createTestWriter() !struct { writer: TerminalWriter, tmp: std.fs.File } {
+    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-tw", .{
+        .read = true,
+        .truncate = true,
+    });
+    return .{
+        .writer = .{ .file = tmp, .use_color = false },
+        .tmp = tmp,
+    };
+}
+
+fn readBackTestOutput(file: std.fs.File, buf: []u8) ![]const u8 {
+    try file.seekTo(0);
+    const n = try file.readAll(buf);
+    return buf[0..n];
+}
+
+test "TerminalWriter.write converts newlines via buffered path" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    try ctx.writer.write("hello\nworld\n");
+    var buf: [256]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("hello\r\nworld\r\n", out);
+}
+
+test "TerminalWriter.write handles empty input" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    try ctx.writer.write("");
+    var buf: [256]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("", out);
+}
+
+test "TerminalWriter.write handles data with no newlines" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    try ctx.writer.write("no newlines here");
+    var buf: [256]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("no newlines here", out);
+}
+
+test "TerminalWriter.write handles data larger than WRITE_BUF_SIZE" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    // Generate data larger than 8192 bytes with embedded newlines
+    const size = TerminalWriter.WRITE_BUF_SIZE + 1000;
+    var input: [size]u8 = undefined;
+    for (&input, 0..) |*c, i| {
+        // Place newlines every 100 chars to exercise the conversion
+        if (i % 100 == 99) {
+            c.* = '\n';
+        } else {
+            c.* = 'A';
+        }
+    }
+
+    try ctx.writer.write(&input);
+
+    // Read back and verify
+    var read_buf: [size * 2]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &read_buf);
+
+    // Count expected newlines
+    var expected_newlines: usize = 0;
+    for (input) |c| {
+        if (c == '\n') expected_newlines += 1;
+    }
+
+    // Output should be input.len + expected_newlines bytes (each \n -> \r\n adds 1 byte)
+    try std.testing.expectEqual(size + expected_newlines, out.len);
+
+    // Verify no bare \n exists (all should be \r\n)
+    var i: usize = 0;
+    while (i < out.len) : (i += 1) {
+        if (out[i] == '\n') {
+            try std.testing.expect(i > 0);
+            try std.testing.expectEqual(@as(u8, '\r'), out[i - 1]);
+        }
+    }
+}
+
+test "TerminalWriter.print writes formatted output" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    try ctx.writer.print("hello {s} {d}", .{ "world", 42 });
+    var buf: [256]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("hello world 42", out);
+}
+
+test "TerminalWriter.print writes partial buffer on overflow instead of dropping" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    // Build a format string argument larger than PRINT_BUF_SIZE (4096).
+    // We pass a long string that will exceed the buffer.
+    const big = "X" ** (TerminalWriter.PRINT_BUF_SIZE + 100);
+    try ctx.writer.print("{s}", .{big});
+
+    // Read back -- should have written PRINT_BUF_SIZE bytes (the full buffer),
+    // NOT zero bytes (old silent-drop behavior).
+    var read_buf: [TerminalWriter.PRINT_BUF_SIZE + 200]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &read_buf);
+    try std.testing.expectEqual(TerminalWriter.PRINT_BUF_SIZE, out.len);
+
+    // Verify content is all 'X's
+    for (out) |c| {
+        try std.testing.expectEqual(@as(u8, 'X'), c);
+    }
+}
+
+test "TerminalWriter.setColor composes single ANSI sequence" {
+    // Create a writer with color enabled to test setColor
+    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-color", .{
+        .read = true,
+        .truncate = true,
+    });
+    defer tmp.close();
+
+    const writer = TerminalWriter{ .file = tmp, .use_color = true };
+    try writer.setColor(.red);
+
+    var buf: [64]u8 = undefined;
+    const out = try readBackTestOutput(tmp, &buf);
+    try std.testing.expectEqualStrings("\x1b[31m", out);
+}
+
+test "TerminalWriter.setStyle composes single ANSI sequence" {
+    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-style", .{
+        .read = true,
+        .truncate = true,
+    });
+    defer tmp.close();
+
+    const writer = TerminalWriter{ .file = tmp, .use_color = true };
+    try writer.setStyle(.bold);
+
+    var buf: [64]u8 = undefined;
+    const out = try readBackTestOutput(tmp, &buf);
+    try std.testing.expectEqualStrings("\x1b[1m", out);
+}
+
+test "TerminalWriter.setColor is no-op when color disabled" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    // ctx.writer has use_color = false
+    try ctx.writer.setColor(.red);
+
+    var buf: [64]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("", out);
+}
+
+test "TerminalWriter.setStyle is no-op when color disabled" {
+    const ctx = try createTestWriter();
+    defer ctx.tmp.close();
+
+    try ctx.writer.setStyle(.bold);
+
+    var buf: [64]u8 = undefined;
+    const out = try readBackTestOutput(ctx.tmp, &buf);
+    try std.testing.expectEqualStrings("", out);
+}
+
+test "Color.code returns correct ANSI codes" {
+    try std.testing.expectEqualStrings("39", Color.default.code());
+    try std.testing.expectEqualStrings("31", Color.red.code());
+    try std.testing.expectEqualStrings("32", Color.green.code());
+    try std.testing.expectEqualStrings("97", Color.bright_white.code());
+}
+
+test "Style.code returns correct ANSI codes" {
+    try std.testing.expectEqualStrings("0", Style.reset.code());
+    try std.testing.expectEqualStrings("1", Style.bold.code());
+    try std.testing.expectEqualStrings("2", Style.dim.code());
+    try std.testing.expectEqualStrings("4", Style.underline.code());
+}
+
+test "buffer size constants are accessible" {
+    try std.testing.expectEqual(@as(usize, 4096), TerminalWriter.PRINT_BUF_SIZE);
+    try std.testing.expectEqual(@as(usize, 8192), TerminalWriter.WRITE_BUF_SIZE);
 }

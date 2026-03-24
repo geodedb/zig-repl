@@ -11,7 +11,7 @@
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public issue
-2. Email security concerns to: security@codepros.dev
+2. Email security concerns to: security@devnw.com
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -34,7 +34,7 @@ This project implements the following security measures:
 - Memory-safe Zig implementation
 - No external C dependencies (stdlib only)
 - Compile-time safety checks enabled
-- Fuzz testing for parser inputs
+- Fuzz testing for parser and input handling (coverage-guided via `std.testing.fuzz`)
 
 ### Release Security
 - All releases are tagged and signed

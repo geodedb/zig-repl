@@ -57,23 +57,23 @@ pub fn main() !void {
     try repl.Repl.run(.{
         .allocator = gpa.allocator(),
         .prompt = ">>> ",
-        .execute_fn = executeCommand,
+        .run_fn = runCommand,
     });
 }
 
-fn executeCommand(
+fn runCommand(
+    _: ?*anyopaque,
+    _: std.mem.Allocator,
     input: []const u8,
-    out: repl.TerminalWriter,
     _: *repl.HistoryStore,
-    _: *anyopaque,
-) !repl.KeyAction {
+) anyerror!bool {
     if (std.mem.eql(u8, input, "quit")) {
-        return .quit;
+        return false; // exit REPL
     }
 
-    try out.write("You entered: ");
-    try out.writeLine(input);
-    return .none;
+    const stdout = std.io.getStdOut();
+    try stdout.writer().print("You entered: {s}\n", .{input});
+    return true; // continue REPL
 }
 ```
 
@@ -86,56 +86,61 @@ The `Repl.run()` function accepts a configuration struct with these options:
 | `allocator` | `Allocator` | required | Memory allocator |
 | `prompt` | `[]const u8` | `"> "` | Primary prompt string |
 | `continuation_prompt` | `[]const u8` | `"... "` | Multi-line continuation prompt |
-| `execute_fn` | `ExecuteFn` | required | Callback for command execution |
-| `complete_fn` | `?CompleteFn` | `null` | Tab completion callback |
-| `is_complete_fn` | `?IsCompleteFn` | `null` | Multi-line input detection |
-| `history_file` | `?[]const u8` | `null` | Path to persist history |
-| `max_history` | `usize` | `1000` | Maximum history entries |
-| `use_color` | `bool` | `true` | Enable colored output |
 | `keymap` | `Keymap` | `.emacs` | `.emacs` or `.vi` |
-| `context` | `*anyopaque` | undefined | User context passed to callbacks |
+| `history_enabled` | `bool` | `true` | Enable command history |
+| `app_name` | `[]const u8` | `"repl"` | Application name (used for default history file path) |
+| `history_path` | `?[]const u8` | `null` | Custom history file path (overrides default) |
+| `run_fn` | `?RunFn` | `null` | Command handler callback (see Quick Start) |
+| `is_complete_fn` | `?IsCompleteFn` | `null` | Multi-line input detection |
+| `complete_fn` | `?CompleteFn` | `null` | Tab completion callback |
+| `welcome_fn` | `?WelcomeFn` | `null` | Welcome message printer (called before entering raw mode) |
+| `verbose` | `bool` | `false` | Show verbose output |
+| `user_context` | `?*anyopaque` | `null` | User context passed to `run_fn` callback |
+
+> **Note:** `Repl.Options` is for REPL initialization. The separate `Config` type
+> (`repl.Config`) provides application-level persistence via `loadFromFile()` and
+> `saveToFile()`. These are separate by design -- `Config` is not auto-loaded by
+> `Repl.run()`. Applications that want config file support should load a `Config`,
+> then map its fields to `Options` when calling `Repl.run()`.
 
 ## Terminal Output
 
-The library provides `TerminalWriter` for proper terminal output in raw mode:
+The library provides `TerminalWriter` for proper terminal output in raw mode.
+You can construct one from `std.io.getStdOut()` or receive `stdout` via `welcome_fn`:
 
 ```zig
-fn executeCommand(
-    input: []const u8,
-    out: repl.TerminalWriter,
-    history: *repl.HistoryStore,
-    ctx: *anyopaque,
-) !repl.KeyAction {
-    // Basic output (handles \n -> \r\n conversion automatically)
-    try out.write("Hello, world!\n");
-    try out.writeLine("This adds a newline");
-    try out.print("Formatted: {d}\n", .{42});
+const repl = @import("repl");
 
-    // Colored output
-    try out.writeColored(.green, "Success!");
-    try out.writeColored(.red, "Error!");
+// Create a TerminalWriter for stdout
+const out = repl.TerminalWriter{ .file = std.io.getStdOut(), .use_color = true };
 
-    // Styled output
-    try out.writeBold("Important");
-    try out.writeStyled(.italic, "Emphasized");
+// Basic output (handles \n -> \r\n conversion automatically)
+try out.write("Hello, world!\n");
+try out.writeLine("This adds a newline");
+try out.print("Formatted: {d}\n", .{42});
 
-    // Semantic helpers
-    try out.writeError("Something went wrong");    // Red "Error: " prefix
-    try out.writeWarning("Be careful");            // Yellow "Warning: " prefix
-    try out.writeSuccess("Operation completed");   // Green message
-    try out.writeInfo("FYI");                      // Cyan message
+// Colored output
+try out.writeColored(.green, "Success!");
+try out.writeColored(.red, "Error!");
 
-    // Screen control
-    try out.clearScreen();
-    try out.clearLine();
+// Styled output (style, color, text)
+try out.writeBold("Important");
+try out.writeStyled(.italic, .default, "Emphasized");
 
-    // Manual color control
-    try out.setColor(.blue);
-    try out.write("Blue text");
-    try out.resetStyle();
+// Semantic helpers
+try out.writeError("Something went wrong");    // Red "Error: " prefix
+try out.writeWarning("Be careful");            // Yellow "Warning: " prefix
+try out.writeSuccess("Operation completed");   // Green message
+try out.writeInfo("FYI");                      // Cyan message
 
-    return .none;
-}
+// Screen control
+try out.clearScreen();
+try out.clearLine();
+
+// Manual color control
+try out.setColor(.blue);
+try out.write("Blue text");
+try out.resetStyle();
 ```
 
 ### Available Colors
@@ -206,34 +211,33 @@ The library provides these parsing utilities:
 
 ## Command History
 
-The `HistoryStore` is passed to your execute function:
+The `HistoryStore` is passed to your `run_fn` callback:
 
 ```zig
-fn executeCommand(
+fn runCommand(
+    _: ?*anyopaque,
+    _: std.mem.Allocator,
     input: []const u8,
-    out: repl.TerminalWriter,
-    history: *repl.HistoryStore,
-    ctx: *anyopaque,
-) !repl.KeyAction {
-    // Show history
-    const count = history.count();
-    for (history.entries.items, 0..) |entry, i| {
-        try out.print("{d}: {s}\n", .{ i + 1, entry });
-    }
+    hist: *repl.HistoryStore,
+) anyerror!bool {
+    // Show history count
+    const count = hist.count();
+    _ = count;
 
     // Search history
-    if (history.searchBackward("pattern", null)) |result| {
-        try out.print("Found at {d}: {s}\n", .{ result.index, result.entry });
+    if (hist.searchBackward("pattern", null)) |result| {
+        _ = result;
     }
 
     // Clear history
-    history.clear();
+    hist.clear();
 
-    return .none;
+    return true;
 }
 ```
 
-History is automatically saved if `history_file` is configured.
+History is automatically saved if `history_path` is configured or if `history_enabled`
+is `true` (which uses a default path based on `app_name`).
 
 ## Keybindings
 
@@ -288,12 +292,12 @@ zig build test
 
 ### Core Types
 
-- `Repl` - Main REPL runner
+- `Repl` - Main REPL runner (call `Repl.run(options)` to start)
 - `ReplState` - Internal state (exposed for advanced use)
 - `KeyEvent` - Parsed key events
-- `KeyAction` - Return values from execute function
+- `KeyAction` - Internal action enum for key dispatch (not returned by user callbacks)
 - `Keymap` - Keymap selection (`.emacs` or `.vi`)
-- `Format` - Terminal formatting utilities
+- `Format` - Output format enum (`.text`, `.json`, `.csv`, `.table`)
 
 ### Platform Utilities
 

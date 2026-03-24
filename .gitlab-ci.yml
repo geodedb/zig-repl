@@ -21,6 +21,19 @@ include:
 
 variables:
   ZIG_VERSION: "0.15.2"
+  # Pinned SHA-256 hashes for Zig binary tarballs (SF-020: independent trust root).
+  # These are verified from the git repository, not fetched from the download origin.
+  # When updating ZIG_VERSION, update these hashes from https://ziglang.org/download/
+  ZIG_SHA256_X86_64_LINUX: "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239"
+  ZIG_SHA256_AARCH64_LINUX: "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f"
+
+# Cache the Zig installation directory across jobs to avoid re-downloading
+# the ~45 MB tarball on every job. The existing guard in .install-zig
+# (`if [ ! -f "zig-${ZIG_VERSION}/zig" ]`) skips the download when cached.
+cache:
+  key: "zig-${ZIG_VERSION}"
+  paths:
+    - "zig-${ZIG_VERSION}/"
 
 stages:
   - lint
@@ -31,18 +44,22 @@ stages:
   - sbom
   - release
 
-# Zig installation template (SEC-R6-02: SHA-256 verified via ziglang.org index)
+# Zig installation template (SF-020: SHA-256 pinned in repo, not fetched from download origin)
 .install-zig: &install-zig
-  - apt-get update && apt-get install -y curl xz-utils python3
   - |
     if [ ! -f "zig-${ZIG_VERSION}/zig" ]; then
+      # Install download dependencies only when Zig is not cached
+      command -v curl >/dev/null 2>&1 && command -v xz >/dev/null 2>&1 || { apt-get update && apt-get install -y curl xz-utils; }
       ARCH=$(uname -m)
       case "$ARCH" in
-        x86_64)  ZIG_ARCH="x86_64" ;;
-        aarch64) ZIG_ARCH="aarch64" ;;
-        arm64)   ZIG_ARCH="aarch64" ;;
+        x86_64)  ZIG_ARCH="x86_64"; EXPECTED_HASH="${ZIG_SHA256_X86_64_LINUX}" ;;
+        aarch64) ZIG_ARCH="aarch64"; EXPECTED_HASH="${ZIG_SHA256_AARCH64_LINUX}" ;;
+        arm64)   ZIG_ARCH="aarch64"; EXPECTED_HASH="${ZIG_SHA256_AARCH64_LINUX}" ;;
         *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
       esac
+      if [ -z "${EXPECTED_HASH}" ]; then
+        echo "ERROR: No pinned SHA-256 hash for ${ZIG_ARCH}-linux. Update ZIG_SHA256_* variables."; exit 1
+      fi
       MAJOR=$(echo "$ZIG_VERSION" | cut -d. -f1)
       MINOR=$(echo "$ZIG_VERSION" | cut -d. -f2)
       if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -lt 15 ]; then
@@ -51,18 +68,6 @@ stages:
         ARCHIVE_NAME="zig-${ZIG_ARCH}-linux-${ZIG_VERSION}"
       fi
       TARBALL="${ARCHIVE_NAME}.tar.xz"
-      INDEX_FILE=$(mktemp)
-      curl -fsSL "https://ziglang.org/download/index.json" -o "${INDEX_FILE}"
-      EXPECTED_HASH=$(ZIG_VER="${ZIG_VERSION}" ZIG_ARCH_KEY="${ZIG_ARCH}-linux" ZIG_IDX="${INDEX_FILE}" \
-        python3 -c "
-    import json, os, sys
-    idx = json.load(open(os.environ['ZIG_IDX']))
-    pkg = idx.get(os.environ['ZIG_VER'], {}).get(os.environ['ZIG_ARCH_KEY'], {})
-    h = pkg.get('shasum', '')
-    if not h: sys.exit('SHA-256 not found for ' + os.environ['ZIG_VER'] + '/' + os.environ['ZIG_ARCH_KEY'])
-    print(h)
-    ")
-      rm -f "${INDEX_FILE}"
       curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/${TARBALL}" -o "${TARBALL}"
       echo "${EXPECTED_HASH}  ${TARBALL}" | sha256sum --check --strict
       tar -xJf "${TARBALL}"

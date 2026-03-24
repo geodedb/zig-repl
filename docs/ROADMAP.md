@@ -1,5 +1,7 @@
 # Roadmap
 
+**Note:** Issue statuses in this document may drift from GitLab. For authoritative status, check the linked issue directly.
+
 This document outlines the development roadmap for the Zig REPL Library. All items are tracked as GitLab issues and organized into milestones.
 
 ## Milestones
@@ -26,7 +28,7 @@ Improve input handling, keybindings, and editing capabilities.
 | [#7](https://gitlab.com/devnw/zig/repl/-/issues/7) | Implement transpose characters (Ctrl+T) | Low | Open |
 | [#8](https://gitlab.com/devnw/zig/repl/-/issues/8) | Add word case operations | Low | Open |
 | [#9](https://gitlab.com/devnw/zig/repl/-/issues/9) | Implement numeric argument prefixes | Low | Open |
-| [#24](https://gitlab.com/devnw/zig/repl/-/issues/24) | Add history deduplication | Medium | Open |
+| [#24](https://gitlab.com/devnw/zig/repl/-/issues/24) | Add history deduplication | Medium | Closed |
 | [#25](https://gitlab.com/devnw/zig/repl/-/issues/25) | Add history timestamps | Low | Open |
 | [#26](https://gitlab.com/devnw/zig/repl/-/issues/26) | Implement history import/export | Low | Open |
 
@@ -52,7 +54,7 @@ Platform-specific improvements and extensibility features.
 | [#16](https://gitlab.com/devnw/zig/repl/-/issues/16) | Add plugin/hook system | Low | Open |
 | [#17](https://gitlab.com/devnw/zig/repl/-/issues/17) | Implement async input handling | Medium | Open |
 | [#18](https://gitlab.com/devnw/zig/repl/-/issues/18) | Add configurable tab width | Low | Open |
-| [#19](https://gitlab.com/devnw/zig/repl/-/issues/19) | Improve signal handling | Medium | Open |
+| [#19](https://gitlab.com/devnw/zig/repl/-/issues/19) | Improve signal handling | Medium | Closed |
 
 ### [v1.0 Release](https://gitlab.com/devnw/zig/repl/-/milestones/5)
 
@@ -61,9 +63,9 @@ First stable release with complete documentation and full test coverage.
 | Issue | Title | Priority | Status |
 |-------|-------|----------|--------|
 | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) | Write API documentation | High | Open |
-| [#21](https://gitlab.com/devnw/zig/repl/-/issues/21) | Create usage examples | High | Open |
-| [#22](https://gitlab.com/devnw/zig/repl/-/issues/22) | Write architecture documentation | Medium | Open |
-| [#23](https://gitlab.com/devnw/zig/repl/-/issues/23) | Create contribution guide | Medium | Open |
+| [#21](https://gitlab.com/devnw/zig/repl/-/issues/21) | Create usage examples | High | Closed |
+| [#22](https://gitlab.com/devnw/zig/repl/-/issues/22) | Write architecture documentation | Medium | Closed |
+| [#23](https://gitlab.com/devnw/zig/repl/-/issues/23) | Create contribution guide | Medium | Closed |
 
 ## Priority Definitions
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2025 CodePros
+
 //! Integration tests for the REPL library
 //!
 //! These tests verify that all components work together correctly.

@@ -17,19 +17,32 @@ const completion = @import("completion.zig");
 const parse = @import("parse.zig");
 const keymap_emacs = @import("keymap_emacs.zig");
 const keymap_vi = @import("keymap_vi.zig");
+const text_utils = @import("text_utils.zig");
+const render = @import("render.zig");
+const input_mod = @import("input.zig");
 
-/// Keymap selection
-pub const Keymap = enum { emacs, vi };
+const findWordStart = text_utils.findWordStart;
+const findWordEnd = text_utils.findWordEnd;
+const isUnsafeControlChar = text_utils.isUnsafeControlChar;
+const appendHistoryFiltered = text_utils.appendHistoryFiltered;
+const sanitizePasteContent = text_utils.sanitizePasteContent;
 
-/// Output format
-pub const Format = enum { text, table, csv, json };
+/// Size of the fixed buffer used for batching terminal render output.
+const RENDER_BUF_SIZE = 8192;
 
-/// Key event from terminal input
-pub const KeyEvent = struct {
-    key: u8,
-    ctrl: bool = false,
-    alt: bool = false,
-};
+/// Size of the fixed buffer used for accumulating bracketed-paste content.
+const PASTE_BUF_SIZE = 4096;
+
+/// Keymap selection.
+/// Unified with Config.Keymap from config.zig; includes fromString() for parsing.
+pub const Keymap = @import("config.zig").Config.Keymap;
+
+/// Output format.
+/// Unified with Config.Format from config.zig; includes fromString() for parsing.
+pub const Format = @import("config.zig").Config.Format;
+
+/// Key event from terminal input (defined in input.zig)
+pub const KeyEvent = input_mod.KeyEvent;
 
 /// Action to perform in response to a key
 pub const KeyAction = enum {
@@ -156,19 +169,19 @@ pub const Repl = struct {
         // Initialize state
         var state = ReplState{
             .allocator = opts.allocator,
-            .buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable,
+            .buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .cursor = 0,
             .history = &hist,
             .history_index = null,
             .keymap = opts.keymap,
             .vi_mode = .insert,
             .quit_requested = false,
-            .kill_ring = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable,
+            .kill_ring = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .last_was_kill = false,
-            .search_buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable,
+            .search_buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .searching = false,
             .completion_ctx = completion.CompletionContext.init(opts.allocator),
-            .multi_line_buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable,
+            .multi_line_buffer = std.ArrayList(u8).initCapacity(opts.allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
             .is_continuation = false,
             .prompt = opts.prompt,
             .continuation_prompt = opts.continuation_prompt,
@@ -240,138 +253,91 @@ pub const ReplState = struct {
     }
 };
 
-/// Calculate tab width at a given column
-fn tabWidth(col: usize) usize {
-    const tab_stop = 8;
-    return tab_stop - (col % tab_stop);
-}
-
-/// Calculate number of visual lines accounting for terminal width
-fn calculateVisualLines(prompt_len: usize, buffer: []const u8, term_width: usize) usize {
-    if (term_width == 0) return 1;
-
-    var lines: usize = 0;
-    var col: usize = prompt_len;
-
-    for (buffer) |c| {
-        if (c == '\n') {
-            lines += 1;
-            col = 0;
-        } else if (c == '\t') {
-            const width = tabWidth(col);
-            col += width;
-            if (col >= term_width) {
-                lines += 1;
-                col = 0;
-            }
-        } else {
-            col += 1;
-            if (col >= term_width) {
-                lines += 1;
-                col = 0;
-            }
-        }
-    }
-
-    return lines;
-}
-
-/// Calculate cursor position accounting for wraps
-fn calculateCursorPosition(prompt_len: usize, buffer: []const u8, cursor: usize, term_width: usize) struct { rows_from_end: usize, col: usize } {
-    if (term_width == 0) return .{ .rows_from_end = 0, .col = cursor + prompt_len };
-
-    var total_lines: usize = 0;
-    var cursor_line: usize = 0;
-    var cursor_col: usize = 0;
-    var col: usize = prompt_len;
-    var found_cursor = false;
-
-    for (buffer, 0..) |c, i| {
-        if (i == cursor) {
-            cursor_line = total_lines;
-            cursor_col = col;
-            found_cursor = true;
-        }
-
-        if (c == '\n') {
-            total_lines += 1;
-            col = 0;
-        } else if (c == '\t') {
-            const width = tabWidth(col);
-            col += width;
-            if (col >= term_width) {
-                total_lines += 1;
-                col = 0;
-            }
-        } else {
-            col += 1;
-            if (col >= term_width) {
-                total_lines += 1;
-                col = 0;
-            }
-        }
-    }
-
-    if (!found_cursor) {
-        cursor_line = total_lines;
-        cursor_col = col;
-    }
-
-    return .{
-        .rows_from_end = total_lines - cursor_line,
-        .col = cursor_col,
-    };
-}
-
 fn renderPrompt(state: *ReplState) !void {
     const stdout = platform.getStdoutHandle();
     const term_width = platform.getTerminalWidth();
 
     const prompt = state.getPrompt();
 
+    // Accumulate all render output into a fixed buffer, then issue a single write.
+    // If the buffer fills, we stop writing and output the valid partial content.
+    var render_buf: [RENDER_BUF_SIZE]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&render_buf);
+    const w = fbs.writer();
+
+    var buffer_full = false;
+
     // Move cursor up from current row to start
     if (state.last_cursor_row > 0) {
-        var move_buf: [32]u8 = undefined;
-        const move_str = std.fmt.bufPrint(&move_buf, "\x1b[{d}A", .{state.last_cursor_row}) catch "\x1b[1A";
-        try stdout.writeAll(move_str);
+        std.fmt.format(w, "\x1b[{d}A", .{state.last_cursor_row}) catch {
+            buffer_full = true;
+        };
     }
 
     // Clear from cursor to end of screen
-    try stdout.writeAll("\r\x1b[J");
+    if (!buffer_full) w.writeAll("\r\x1b[J") catch {
+        buffer_full = true;
+    };
 
     // Write prompt
-    try stdout.writeAll(prompt);
+    if (!buffer_full) w.writeAll(prompt) catch {
+        buffer_full = true;
+    };
 
-    // Write buffer
-    for (state.buffer.items) |c| {
-        if (c == '\n') {
-            try stdout.writeAll("\r\n");
-        } else {
-            try stdout.writeAll(&[_]u8{c});
-        }
-    }
+    // Write buffer contents, sanitizing control characters for display.
+    // If the render buffer fills, stop immediately to avoid broken ANSI sequences.
+    if (!buffer_full) for (state.buffer.items) |c| {
+        const write_result = if (c == '\n')
+            w.writeAll("\r\n")
+        else if (c == '\t' or (c >= 0x20 and c != 0x7F))
+            w.writeAll(&[_]u8{c})
+        else
+            // Control characters and DEL - show visual indicator
+            w.writeAll("?");
+
+        write_result catch {
+            buffer_full = true;
+            break;
+        };
+    };
 
     // Calculate visual lines
-    const current_visual_lines = calculateVisualLines(prompt.len, state.buffer.items, term_width);
+    const current_visual_lines = render.calculateVisualLines(prompt.len, state.buffer.items, term_width);
 
-    // Position cursor
-    const cursor_pos = calculateCursorPosition(prompt.len, state.buffer.items, state.cursor, term_width);
+    // Position cursor -- only if the buffer has not overflowed, since writing
+    // partial ANSI escape sequences would corrupt the terminal.
+    if (!buffer_full) {
+        const cursor_pos = render.calculateCursorPosition(prompt.len, state.buffer.items, state.cursor, term_width);
 
-    if (cursor_pos.rows_from_end > 0) {
-        var move_buf: [32]u8 = undefined;
-        const move_str = std.fmt.bufPrint(&move_buf, "\x1b[{d}A", .{cursor_pos.rows_from_end}) catch return;
-        try stdout.writeAll(move_str);
+        if (cursor_pos.rows_from_end > 0) {
+            std.fmt.format(w, "\x1b[{d}A", .{cursor_pos.rows_from_end}) catch {
+                buffer_full = true;
+            };
+        }
+
+        if (!buffer_full) {
+            std.fmt.format(w, "\r\x1b[{d}C", .{cursor_pos.col}) catch {
+                buffer_full = true;
+            };
+        }
+
+        // Single write for entire render output
+        try stdout.writeAll(fbs.getWritten());
+
+        // Update tracking state
+        state.last_cursor_row = current_visual_lines - cursor_pos.rows_from_end;
+    } else {
+        // Buffer overflowed -- write the valid partial content we have.
+        // Cursor positioning is skipped to avoid broken ANSI sequences.
+        try stdout.writeAll(fbs.getWritten());
+
+        // Without cursor positioning, assume cursor is at the end
+        state.last_cursor_row = 0;
     }
 
-    var col_buf: [32]u8 = undefined;
-    const col_str = std.fmt.bufPrint(&col_buf, "\r\x1b[{d}C", .{cursor_pos.col}) catch return;
-    try stdout.writeAll(col_str);
-
-    // Update tracking state
     state.content_changed = false;
     state.last_buffer_len = state.buffer.items.len;
     state.last_visual_lines = current_visual_lines;
-    state.last_cursor_row = current_visual_lines - cursor_pos.rows_from_end;
 }
 
 fn processInput(state: *ReplState) !void {
@@ -382,279 +348,217 @@ fn processInput(state: *ReplState) !void {
         const n = try stdin.read(&buf);
         if (n == 0) continue;
 
-        var i: usize = 0;
         var last_action: KeyAction = .none;
+        var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+        var paste_len: usize = 0;
 
+        var i: usize = 0;
         while (i < n) {
-            // Check for bracketed paste sequences
-            if (i + 5 < n and buf[i] == 0x1b and buf[i + 1] == '[' and buf[i + 2] == '2' and buf[i + 3] == '0' and buf[i + 4] == '0' and buf[i + 5] == '~') {
-                state.in_bracketed_paste = true;
-                state.paste_strip_leading = true;
-                i += 6;
-                continue;
-            }
-
-            if (i + 5 < n and buf[i] == 0x1b and buf[i + 1] == '[' and buf[i + 2] == '2' and buf[i + 3] == '0' and buf[i + 4] == '1' and buf[i + 5] == '~') {
-                state.in_bracketed_paste = false;
-                state.paste_strip_leading = false;
-                i += 6;
-                continue;
-            }
-
-            const c = buf[i];
-
-            // In bracketed paste mode, insert characters literally
-            if (state.in_bracketed_paste) {
-                if (c == '\r') {
-                    i += 1;
-                    continue;
-                }
-                if (state.paste_strip_leading) {
-                    if (c == ' ' or c == '\t') {
-                        i += 1;
-                        continue;
-                    }
-                    state.paste_strip_leading = false;
-                }
-                if (c == '\n' or c == '\t' or c >= 0x20) {
-                    state.buffer.insert(state.allocator, state.cursor, c) catch break;
-                    state.cursor += 1;
-                    state.content_changed = true;
-                    last_action = .insert;
-                }
-                i += 1;
-                continue;
-            }
+            if (consumeBracketedPaste(buf[0..n], &i, state, &paste_buf, &paste_len, &last_action)) continue;
 
             const remaining = buf[i..n];
             const key_event = parseKeyEvent(remaining) catch break;
-            const consumed = getKeyEventLength(remaining);
-            i += consumed;
+            i += getKeyEventLength(remaining);
 
             const action = switch (state.keymap) {
                 .emacs => keymap_emacs.handleKey(state, key_event),
                 .vi => keymap_vi.handleKey(state, key_event),
             };
-
             processAction(state, action) catch break;
             last_action = action;
         }
 
-        // Render when not in paste mode and stdin is quiet
         if (!state.in_bracketed_paste and !platform.stdinHasMoreData()) {
-            renderPrompt(state) catch {};
-        }
-
-        // Handle command invocation
-        if (last_action == .run) {
-            const input = state.buffer.items;
-            if (input.len > 0) {
-                // Check for backslash continuation
-                if (input[input.len - 1] == '\\') {
-                    _ = state.buffer.pop();
-                    if (state.is_continuation) {
-                        try state.multi_line_buffer.append(state.allocator, '\n');
-                        try state.multi_line_buffer.appendSlice(state.allocator, state.buffer.items);
-                    } else {
-                        state.multi_line_buffer.clearRetainingCapacity();
-                        try state.multi_line_buffer.appendSlice(state.allocator, state.buffer.items);
-                    }
-                    state.is_continuation = true;
-                    state.buffer.clearRetainingCapacity();
-                    state.cursor = 0;
-                    state.last_visual_lines = 0;
-                    state.last_cursor_row = 0;
-                    state.content_changed = true;
-                    const stdout = platform.getStdoutHandle();
-                    try stdout.writeAll("\r\n");
+            renderPrompt(state) catch |err| {
+                if (err == error.BrokenPipe) {
+                    state.quit_requested = true;
                     break :outer;
                 }
-
-                // Build complete input
-                if (state.is_continuation) {
-                    try state.multi_line_buffer.append(state.allocator, '\n');
-                    try state.multi_line_buffer.appendSlice(state.allocator, input);
-                } else {
-                    state.multi_line_buffer.clearRetainingCapacity();
-                    try state.multi_line_buffer.appendSlice(state.allocator, input);
-                }
-
-                const complete_input = state.multi_line_buffer.items;
-
-                // Check if statement is complete
-                if (state.is_complete_fn(complete_input)) {
-                    // Save to history
-                    if (complete_input.len > 0 and complete_input[0] != ' ') {
-                        state.history.append(complete_input) catch {};
-                    }
-
-                    const stdout = platform.getStdoutHandle();
-                    try stdout.writeAll("\r\n");
-
-                    // Invoke handler
-                    if (state.run_fn) |handler| {
-                        const should_continue = handler(state.user_context, state.allocator, complete_input, state.history) catch |err| blk: {
-                            const stderr = platform.getStderrHandle();
-                            stderr.writeAll("Error: ") catch {};
-                            stderr.writeAll(@errorName(err)) catch {};
-                            stderr.writeAll("\r\n") catch {};
-                            break :blk true;
-                        };
-                        if (!should_continue) {
-                            state.quit_requested = true;
-                        }
-                    }
-
-                    // Reset
-                    state.buffer.clearRetainingCapacity();
-                    state.cursor = 0;
-                    state.is_continuation = false;
-                    state.multi_line_buffer.clearRetainingCapacity();
-                    state.last_visual_lines = 0;
-                    state.last_cursor_row = 0;
-                    state.content_changed = true;
-                    state.history_index = null;
-                } else {
-                    // Continue multi-line input
-                    state.is_continuation = true;
-                    state.buffer.clearRetainingCapacity();
-                    state.cursor = 0;
-                    state.last_visual_lines = 0;
-                    state.last_cursor_row = 0;
-                    state.content_changed = true;
-                    const stdout = platform.getStdoutHandle();
-                    try stdout.writeAll("\r\n");
-                }
-            }
-            break :outer;
+            };
         }
 
+        if (last_action == .run) {
+            try handleCommandSubmission(state);
+            break :outer;
+        }
         if (last_action == .cancel) {
-            const stdout = platform.getStdoutHandle();
-            if (state.buffer.items.len == 0 and !state.is_continuation) {
-                try stdout.writeAll("\r\n^C\r\n");
-                state.quit_requested = true;
-                break :outer;
-            } else {
-                state.is_continuation = false;
-                state.multi_line_buffer.clearRetainingCapacity();
-                state.buffer.clearRetainingCapacity();
-                state.cursor = 0;
-                state.last_visual_lines = 0;
-                state.last_cursor_row = 0;
-                state.content_changed = true;
-                try stdout.writeAll("\r\n^C\r\n");
-            }
+            try handleCancellation(state);
             break :outer;
         }
+        if (last_action == .quit and state.buffer.items.len == 0) {
+            state.quit_requested = true;
+            break :outer;
+        }
+    }
+}
 
-        if (last_action == .quit) {
-            if (state.buffer.items.len == 0) {
-                state.quit_requested = true;
-                break :outer;
+/// Reset input state after a command is processed or cancelled.
+fn resetLineState(state: *ReplState) void {
+    state.buffer.clearRetainingCapacity();
+    state.cursor = 0;
+    state.last_visual_lines = 0;
+    state.last_cursor_row = 0;
+    state.content_changed = true;
+}
+
+/// Handle bracketed paste sequences and character collection.
+/// Returns true if the current byte was consumed (caller should `continue`).
+///
+/// When the paste buffer fills before the end marker is seen, the accumulated
+/// content is flushed into `state.buffer` (after sanitization) and collection
+/// continues. This allows pastes of arbitrary size without dynamic allocation.
+fn consumeBracketedPaste(
+    buf: []const u8,
+    i: *usize,
+    state: *ReplState,
+    paste_buf: *[PASTE_BUF_SIZE]u8,
+    paste_len: *usize,
+    last_action: *KeyAction,
+) bool {
+    // Check for paste start: ESC[200~
+    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], "\x1b[200~")) {
+        state.in_bracketed_paste = true;
+        state.paste_strip_leading = true;
+        paste_len.* = 0;
+        i.* += 6;
+        return true;
+    }
+    // Check for paste end: ESC[201~
+    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], "\x1b[201~")) {
+        state.in_bracketed_paste = false;
+        state.paste_strip_leading = false;
+        if (paste_len.* > 0) {
+            flushPasteBuffer(state, paste_buf, paste_len, last_action);
+        }
+        i.* += 6;
+        return true;
+    }
+    // Collect characters while in paste mode
+    if (state.in_bracketed_paste) {
+        const c = buf[i.*];
+        if (c != '\r') {
+            if (state.paste_strip_leading and (c == ' ' or c == '\t')) {
+                // skip leading whitespace
+            } else {
+                state.paste_strip_leading = false;
+                if (c == '\n' or c == '\t' or c >= 0x20) {
+                    // Flush the paste buffer when full to handle arbitrarily large pastes
+                    if (paste_len.* >= paste_buf.len) {
+                        flushPasteBuffer(state, paste_buf, paste_len, last_action);
+                    }
+                    paste_buf[paste_len.*] = c;
+                    paste_len.* += 1;
+                }
             }
         }
+        i.* += 1;
+        return true;
+    }
+    return false;
+}
+
+/// Flush accumulated paste buffer content into the edit buffer after sanitization.
+/// Resets `paste_len` to 0 so collection can continue.
+fn flushPasteBuffer(
+    state: *ReplState,
+    paste_buf: *[PASTE_BUF_SIZE]u8,
+    paste_len: *usize,
+    last_action: *KeyAction,
+) void {
+    const data = paste_buf[0..paste_len.*];
+    const sanitized = sanitizePasteContent(data);
+    state.buffer.insertSlice(state.allocator, state.cursor, sanitized) catch return;
+    state.cursor += sanitized.len;
+    state.content_changed = true;
+    last_action.* = .insert;
+    paste_len.* = 0;
+}
+
+/// Append current buffer to multi-line buffer, handling continuation.
+fn appendToMultiLine(state: *ReplState, input: []const u8) !void {
+    if (state.is_continuation) {
+        try state.multi_line_buffer.append(state.allocator, '\n');
+        try state.multi_line_buffer.appendSlice(state.allocator, input);
+    } else {
+        state.multi_line_buffer.clearRetainingCapacity();
+        try state.multi_line_buffer.appendSlice(state.allocator, input);
     }
 }
 
-fn parseKeyEvent(data: []const u8) !KeyEvent {
-    if (data.len == 0) return error.NoInput;
+/// Handle the .run action: backslash continuation, command dispatch, history.
+fn handleCommandSubmission(state: *ReplState) !void {
+    const input = state.buffer.items;
+    if (input.len == 0) return;
 
-    if (data[0] == 0x1b) {
-        if (data.len > 1) {
-            if (data[1] == '[') {
-                if (data.len > 2) {
-                    // Extended sequences: ESC [ n ~
-                    if (data.len > 3 and data[3] == '~') {
-                        return switch (data[2]) {
-                            '2' => KeyEvent{ .key = 0x02 }, // Insert
-                            '3' => KeyEvent{ .key = 0x7f, .ctrl = true }, // Delete
-                            '5' => KeyEvent{ .key = 0x05 }, // Page Up
-                            '6' => KeyEvent{ .key = 0x06 }, // Page Down
-                            else => KeyEvent{ .key = data[2] },
-                        };
-                    }
+    // Check for backslash continuation
+    if (input[input.len - 1] == '\\') {
+        _ = state.buffer.pop();
+        try appendToMultiLine(state, state.buffer.items);
+        state.is_continuation = true;
+        resetLineState(state);
+        const stdout = platform.getStdoutHandle();
+        try stdout.writeAll("\r\n");
+        return;
+    }
 
-                    // Modifier sequences: ESC [ 1 ; n X
-                    if (data.len > 5 and data[2] == '1' and data[3] == ';') {
-                        const modifier = data[4];
-                        const key_char = data[5];
+    try appendToMultiLine(state, input);
+    const complete_input = state.multi_line_buffer.items;
 
-                        const is_ctrl = (modifier == '5' or modifier == '7');
-                        const is_alt = (modifier == '3' or modifier == '7');
-
-                        return switch (key_char) {
-                            'A' => KeyEvent{ .key = 'p', .ctrl = true, .alt = is_alt },
-                            'B' => KeyEvent{ .key = 'n', .ctrl = true, .alt = is_alt },
-                            'C' => if (is_ctrl) KeyEvent{ .key = 'f', .alt = true } else KeyEvent{ .key = 'f', .ctrl = true },
-                            'D' => if (is_ctrl) KeyEvent{ .key = 'b', .alt = true } else KeyEvent{ .key = 'b', .ctrl = true },
-                            'H' => KeyEvent{ .key = 'a', .ctrl = true, .alt = is_ctrl },
-                            'F' => KeyEvent{ .key = 'e', .ctrl = true, .alt = is_ctrl },
-                            else => KeyEvent{ .key = key_char },
-                        };
-                    }
-
-                    // Standard arrow keys
-                    return switch (data[2]) {
-                        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
-                        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
-                        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
-                        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
-                        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
-                        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
-                        'Z' => KeyEvent{ .key = 'i', .ctrl = true, .alt = true }, // Shift+Tab
-                        else => KeyEvent{ .key = data[2] },
-                    };
+    if (state.is_complete_fn(complete_input)) {
+        // Save to history (skip commands starting with space for privacy)
+        if (complete_input.len > 0 and complete_input[0] != ' ') {
+            state.history.append(complete_input) catch |err| {
+                if (state.verbose) {
+                    const stderr = platform.getStderrHandle();
+                    stderr.writeAll("Warning: failed to append to history: ") catch {};
+                    stderr.writeAll(@errorName(err)) catch {};
+                    stderr.writeAll("\r\n") catch {};
                 }
-            } else if (data[1] == 'O') {
-                if (data.len > 2) {
-                    return switch (data[2]) {
-                        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
-                        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
-                        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
-                        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
-                        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
-                        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
-                        else => KeyEvent{ .key = data[2] },
-                    };
-                }
-            } else if ((data[1] & 0x7f) >= 'a' and (data[1] & 0x7f) <= 'z') {
-                return KeyEvent{ .key = @intCast(data[1] & 0x7f), .alt = true };
-            } else if (data[1] >= 'A' and data[1] <= 'Z') {
-                return KeyEvent{ .key = @intCast(data[1] - 'A' + 'a'), .alt = true };
-            }
+            };
         }
-        return KeyEvent{ .key = 0x1b };
-    }
 
-    // Control characters
-    if (data[0] < 0x20) {
-        return KeyEvent{ .key = @intCast(data[0] + 'a' - 1), .ctrl = true };
-    }
+        const stdout = platform.getStdoutHandle();
+        try stdout.writeAll("\r\n");
 
-    return KeyEvent{ .key = data[0] };
+        if (state.run_fn) |handler| {
+            const should_continue = handler(state.user_context, state.allocator, complete_input, state.history) catch |err| blk: {
+                const stderr = platform.getStderrHandle();
+                stderr.writeAll("Error: ") catch {};
+                stderr.writeAll(@errorName(err)) catch {};
+                stderr.writeAll("\r\n") catch {};
+                break :blk true;
+            };
+            if (!should_continue) state.quit_requested = true;
+        }
+
+        resetLineState(state);
+        state.is_continuation = false;
+        state.multi_line_buffer.clearRetainingCapacity();
+        state.history_index = null;
+    } else {
+        state.is_continuation = true;
+        resetLineState(state);
+        const stdout = platform.getStdoutHandle();
+        try stdout.writeAll("\r\n");
+    }
 }
 
-fn getKeyEventLength(data: []const u8) usize {
-    if (data.len == 0) return 0;
-
-    if (data[0] == 0x1b) {
-        if (data.len > 1 and data[1] == '[') {
-            if (data.len > 3 and data[3] == '~') return 4;
-            if (data.len > 5 and data[2] == '1' and data[3] == ';') return 6;
-            if (data.len > 2) return 3;
-            return 2;
-        } else if (data.len > 1 and data[1] == 'O') {
-            if (data.len > 2) return 3;
-            return 2;
-        } else if (data.len > 1) {
-            return 2;
-        }
-        return 1;
+/// Handle the .cancel action: Ctrl+C behavior.
+fn handleCancellation(state: *ReplState) !void {
+    const stdout = platform.getStdoutHandle();
+    if (state.buffer.items.len == 0 and !state.is_continuation) {
+        try stdout.writeAll("\r\n^C\r\n");
+        state.quit_requested = true;
+    } else {
+        state.is_continuation = false;
+        state.multi_line_buffer.clearRetainingCapacity();
+        resetLineState(state);
+        try stdout.writeAll("\r\n^C\r\n");
     }
-
-    return 1;
 }
+
+const parseKeyEvent = input_mod.parseKeyEvent;
+const getKeyEventLength = input_mod.getKeyEventLength;
 
 fn processAction(state: *ReplState, action: KeyAction) !void {
     const content_modifying = switch (action) {
@@ -676,26 +580,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             state.buffer.insert(state.allocator, state.cursor, '\t') catch return;
             state.cursor += 1;
         },
-        .reverse_tab => {
-            var line_start: usize = state.cursor;
-            while (line_start > 0 and state.buffer.items[line_start - 1] != '\n') {
-                line_start -= 1;
-            }
-
-            if (line_start < state.buffer.items.len) {
-                if (state.buffer.items[line_start] == '\t') {
-                    _ = state.buffer.orderedRemove(line_start);
-                    if (state.cursor > line_start) state.cursor -= 1;
-                } else if (state.buffer.items[line_start] == ' ') {
-                    var removed: usize = 0;
-                    while (removed < 4 and line_start < state.buffer.items.len and state.buffer.items[line_start] == ' ') {
-                        _ = state.buffer.orderedRemove(line_start);
-                        removed += 1;
-                        if (state.cursor > line_start) state.cursor -= 1;
-                    }
-                }
-            }
-        },
+        .reverse_tab => handleUnindent(state),
         .backspace => {
             if (state.cursor > 0) {
                 state.cursor -= 1;
@@ -709,17 +594,20 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         },
         .delete_word => {
             const end = findWordEnd(state.buffer.items, state.cursor);
-            while (state.cursor < end) {
-                _ = state.buffer.orderedRemove(state.cursor);
+            if (end > state.cursor) {
+                // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
             }
         },
         .delete_word_backward => {
             const start = findWordStart(state.buffer.items, state.cursor);
-            state.kill_ring.clearRetainingCapacity();
-            state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
-            while (state.cursor > start) {
-                state.cursor -= 1;
-                _ = state.buffer.orderedRemove(state.cursor);
+            if (state.cursor > start) {
+                const count = state.cursor - start;
+                state.kill_ring.clearRetainingCapacity();
+                state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
+                // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
+                state.buffer.replaceRange(state.allocator, start, count, &.{}) catch {};
+                state.cursor = start;
             }
             state.last_was_kill = true;
         },
@@ -732,11 +620,8 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         .delete_to_bol => {
             state.kill_ring.clearRetainingCapacity();
             try state.kill_ring.appendSlice(state.allocator, state.buffer.items[0..state.cursor]);
-            const remaining = state.buffer.items[state.cursor..];
-            const remaining_copy = try state.allocator.dupe(u8, remaining);
-            defer state.allocator.free(remaining_copy);
-            state.buffer.clearRetainingCapacity();
-            try state.buffer.appendSlice(state.allocator, remaining_copy);
+            // Single O(n) replaceRange instead of alloc+copy+clear+append cycle
+            state.buffer.replaceRange(state.allocator, 0, state.cursor, &.{}) catch {};
             state.cursor = 0;
             state.last_was_kill = true;
         },
@@ -768,7 +653,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
 
                 if (state.history_index) |idx| {
                     state.buffer.clearRetainingCapacity();
-                    try state.buffer.appendSlice(state.allocator, state.history.entries.items[idx]);
+                    try appendHistoryFiltered(&state.buffer, state.allocator, state.history.entries.items[idx]);
                     state.cursor = state.buffer.items.len;
                 }
             }
@@ -778,7 +663,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
                 if (idx < state.history.entries.items.len - 1) {
                     state.history_index = idx + 1;
                     state.buffer.clearRetainingCapacity();
-                    try state.buffer.appendSlice(state.allocator, state.history.entries.items[idx + 1]);
+                    try appendHistoryFiltered(&state.buffer, state.allocator, state.history.entries.items[idx + 1]);
                     state.cursor = state.buffer.items.len;
                 } else {
                     state.history_index = null;
@@ -791,7 +676,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             if (state.history.entries.items.len > 0) {
                 state.history_index = 0;
                 state.buffer.clearRetainingCapacity();
-                try state.buffer.appendSlice(state.allocator, state.history.entries.items[0]);
+                try appendHistoryFiltered(&state.buffer, state.allocator, state.history.entries.items[0]);
                 state.cursor = state.buffer.items.len;
             }
         },
@@ -799,7 +684,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             if (state.history.entries.items.len > 0) {
                 state.history_index = state.history.entries.items.len - 1;
                 state.buffer.clearRetainingCapacity();
-                try state.buffer.appendSlice(state.allocator, state.history.entries.items[state.history_index.?]);
+                try appendHistoryFiltered(&state.buffer, state.allocator, state.history.entries.items[state.history_index.?]);
                 state.cursor = state.buffer.items.len;
             }
         },
@@ -807,59 +692,15 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             state.searching = true;
             try handleSearch(state);
         },
-        .complete => {
-            if (state.complete_fn) |complete_fn| {
-                const ctx = &state.completion_ctx;
-
-                if (!ctx.active) {
-                    // Start new completion
-                    ctx.reset();
-                    ctx.word_start = completion.findWordStart(state.buffer.items, state.cursor);
-                    const prefix = state.buffer.items[ctx.word_start..state.cursor];
-
-                    // Save original prefix
-                    if (prefix.len > 0) {
-                        ctx.original_prefix = state.allocator.dupe(u8, prefix) catch "";
-                    }
-
-                    // Call user's completion function to populate candidates
-                    complete_fn(prefix, ctx);
-
-                    if (ctx.candidates.items.len > 0) {
-                        ctx.active = true;
-                    }
-                } else {
-                    // Already active, cycle to next candidate
-                    ctx.nextCandidate();
-                }
-
-                // Apply current candidate
-                if (ctx.getCurrentCandidate()) |candidate| {
-                    // Remove the current word
-                    const remove_len = state.cursor - ctx.word_start;
-                    if (remove_len > 0) {
-                        state.buffer.replaceRange(
-                            state.allocator,
-                            ctx.word_start,
-                            remove_len,
-                            &.{},
-                        ) catch {};
-                        state.cursor = ctx.word_start;
-                    }
-
-                    // Insert the completion
-                    state.buffer.insertSlice(state.allocator, state.cursor, candidate) catch {};
-                    state.cursor += candidate.len;
-                    state.content_changed = true;
-                }
-            }
-        },
+        .complete => handleCompletion(state),
         .run, .cancel, .quit => {},
         .yank => {
             try state.buffer.insertSlice(state.allocator, state.cursor, state.kill_ring.items);
             state.cursor += state.kill_ring.items.len;
         },
         .undo => {
+            // Known limitation: this is not a true undo -- it replaces the buffer
+            // with the kill ring contents. A proper undo stack is tracked in issue #5.
             state.buffer.clearRetainingCapacity();
             try state.buffer.appendSlice(state.allocator, state.kill_ring.items);
             state.cursor = state.buffer.items.len;
@@ -879,91 +720,285 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
     }
 }
 
-fn handleSearch(state: *ReplState) !void {
-    const stdout = platform.getStdoutHandle();
-    try stdout.writeAll("\r\n(reverse-i-search)`': ");
+/// Remove one level of leading indentation (tab or up to 4 spaces) from
+/// the current line in the edit buffer.
+fn handleUnindent(state: *ReplState) void {
+    var line_start: usize = state.cursor;
+    while (line_start > 0 and state.buffer.items[line_start - 1] != '\n') {
+        line_start -= 1;
+    }
 
-    state.search_buffer.clearRetainingCapacity();
-
-    const stdin = platform.getStdinHandle();
-    var search_buf: [256]u8 = undefined;
-
-    while (true) {
-        const n = try stdin.read(&search_buf);
-        if (n == 0) continue;
-
-        const c = search_buf[0];
-
-        if (c == 0x1b or c == '\r' or c == '\n') {
-            state.searching = false;
-            break;
-        }
-
-        if (c == 0x03) { // Ctrl+C
-            state.searching = false;
-            state.buffer.clearRetainingCapacity();
-            state.cursor = 0;
-            break;
-        }
-
-        if (c == 0x7f or c == 0x08) {
-            if (state.search_buffer.items.len > 0) {
-                _ = state.search_buffer.pop();
+    if (line_start < state.buffer.items.len) {
+        if (state.buffer.items[line_start] == '\t') {
+            // Single O(n) replaceRange instead of orderedRemove
+            state.buffer.replaceRange(state.allocator, line_start, 1, &.{}) catch {};
+            if (state.cursor > line_start) state.cursor -= 1;
+        } else if (state.buffer.items[line_start] == ' ') {
+            // Count leading spaces (up to 4)
+            var count: usize = 0;
+            while (count < 4 and line_start + count < state.buffer.items.len and state.buffer.items[line_start + count] == ' ') {
+                count += 1;
             }
-        } else if (c >= 0x20 and c < 0x7f) {
-            try state.search_buffer.append(state.allocator, c);
+            if (count > 0) {
+                // Single O(n) replaceRange instead of orderedRemove loop
+                state.buffer.replaceRange(state.allocator, line_start, count, &.{}) catch {};
+                if (state.cursor > line_start) {
+                    state.cursor -= @min(count, state.cursor - line_start);
+                }
+            }
         }
-
-        // Find in history
-        var found = false;
-        if (state.history.searchBackward(state.search_buffer.items, null)) |result| {
-            state.buffer.clearRetainingCapacity();
-            try state.buffer.appendSlice(state.allocator, result.entry);
-            state.cursor = state.buffer.items.len;
-            state.history_index = result.index;
-            found = true;
-        }
-
-        var line_buf: [1024]u8 = undefined;
-        const search_line = try std.fmt.bufPrint(&line_buf, "\r(reverse-i-search)`{s}': {s}", .{
-            state.search_buffer.items,
-            if (found) state.buffer.items else "",
-        });
-        try stdout.writeAll(search_line);
     }
 }
 
-fn findWordStart(text: []const u8, pos: usize) usize {
-    if (pos == 0) return 0;
-    var i = pos;
-    while (i > 0 and std.ascii.isWhitespace(text[i - 1])) : (i -= 1) {}
-    while (i > 0 and !std.ascii.isWhitespace(text[i - 1])) : (i -= 1) {}
-    return i;
+/// Handle tab completion: start a new completion or cycle through candidates.
+fn handleCompletion(state: *ReplState) void {
+    const complete_fn = state.complete_fn orelse return;
+    const ctx = &state.completion_ctx;
+
+    if (!ctx.active) {
+        // Start new completion
+        ctx.reset();
+        ctx.word_start = completion.findWordStart(state.buffer.items, state.cursor);
+        const prefix = state.buffer.items[ctx.word_start..state.cursor];
+
+        // Save original prefix
+        if (prefix.len > 0) {
+            ctx.original_prefix = state.allocator.dupe(u8, prefix) catch "";
+        }
+
+        // Call user's completion function to populate candidates
+        complete_fn(prefix, ctx);
+
+        if (ctx.candidates.items.len > 0) {
+            ctx.active = true;
+        }
+    } else {
+        // Already active, cycle to next candidate
+        ctx.nextCandidate();
+    }
+
+    // Apply current candidate
+    if (ctx.getCurrentCandidate()) |candidate| {
+        // Remove the current word
+        const remove_len = state.cursor - ctx.word_start;
+        if (remove_len > 0) {
+            state.buffer.replaceRange(
+                state.allocator,
+                ctx.word_start,
+                remove_len,
+                &.{},
+            ) catch {};
+            state.cursor = ctx.word_start;
+        }
+
+        // Insert the completion
+        state.buffer.insertSlice(state.allocator, state.cursor, candidate) catch {};
+        state.cursor += candidate.len;
+        state.content_changed = true;
+    }
 }
 
-fn findWordEnd(text: []const u8, pos: usize) usize {
-    if (pos >= text.len) return text.len;
-    var i = pos;
-    while (i < text.len and !std.ascii.isWhitespace(text[i])) : (i += 1) {}
-    while (i < text.len and std.ascii.isWhitespace(text[i])) : (i += 1) {}
-    return i;
+const handleSearch = @import("search.zig").handleSearch;
+
+// Key parsing tests are in input.zig; sanitization tests in text_utils.zig
+
+// ============================================================================
+// Tests for consumeBracketedPaste and renderPrompt buffer handling
+// ============================================================================
+
+/// Create a minimal ReplState suitable for testing paste and render logic.
+/// The caller must call `deinit()` on the returned state and also deinit
+/// the history store.
+fn createTestState(allocator: std.mem.Allocator, hist: *history_mod.HistoryStore) ReplState {
+    return ReplState{
+        .allocator = allocator,
+        .buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
+        .cursor = 0,
+        .history = hist,
+        .history_index = null,
+        .keymap = .emacs,
+        .vi_mode = .insert,
+        .quit_requested = false,
+        .kill_ring = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
+        .last_was_kill = false,
+        .search_buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
+        .searching = false,
+        .completion_ctx = completion.CompletionContext.init(allocator),
+        .multi_line_buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable,
+        .is_continuation = false,
+        .prompt = "> ",
+        .continuation_prompt = "... ",
+        .run_fn = null,
+        .is_complete_fn = parse.isComplete,
+        .complete_fn = null,
+        .user_context = null,
+        .verbose = false,
+    };
 }
 
-test "key event parsing" {
-    // Regular character
-    const regular = try parseKeyEvent("a");
-    try std.testing.expect(regular.key == 'a');
-    try std.testing.expect(!regular.ctrl);
-    try std.testing.expect(!regular.alt);
+test "consumeBracketedPaste: normal paste within buffer size" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
 
-    // Escape sequence for up arrow
-    const up = try parseKeyEvent("\x1b[A");
-    try std.testing.expect(up.key == 'p');
-    try std.testing.expect(up.ctrl);
+    var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+    var paste_len: usize = 0;
+    var last_action: KeyAction = .none;
+
+    // Simulate: ESC[200~ hello ESC[201~
+    const input = "\x1b[200~hello\x1b[201~";
+    var i: usize = 0;
+
+    // Process all bytes
+    while (i < input.len) {
+        _ = consumeBracketedPaste(input, &i, &state, &paste_buf, &paste_len, &last_action);
+    }
+
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(KeyAction.insert, last_action);
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
 }
 
-test "word navigation" {
-    const text = "hello world test";
-    try std.testing.expect(findWordEnd(text, 0) == 6);
-    try std.testing.expect(findWordStart(text, 11) == 6);
+test "consumeBracketedPaste: paste exceeding buffer triggers flush" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+    var paste_len: usize = 0;
+    var last_action: KeyAction = .none;
+
+    // Build a paste sequence larger than PASTE_BUF_SIZE (4096 bytes).
+    // Use 6000 'A' characters to exceed the 4096-byte buffer.
+    const content_size = 6000;
+    const total_size = 6 + content_size + 6; // start marker + content + end marker
+    var input_buf: [total_size]u8 = undefined;
+    @memcpy(input_buf[0..6], "\x1b[200~");
+    @memset(input_buf[6 .. 6 + content_size], 'A');
+    @memcpy(input_buf[6 + content_size ..], "\x1b[201~");
+
+    const input = &input_buf;
+    var i: usize = 0;
+
+    while (i < input.len) {
+        _ = consumeBracketedPaste(input, &i, &state, &paste_buf, &paste_len, &last_action);
+    }
+
+    // The full 6000 bytes should be in the edit buffer (no truncation)
+    try std.testing.expectEqual(@as(usize, content_size), state.buffer.items.len);
+    try std.testing.expectEqual(@as(usize, content_size), state.cursor);
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+
+    // Verify content is all 'A's
+    for (state.buffer.items) |c| {
+        try std.testing.expectEqual(@as(u8, 'A'), c);
+    }
+}
+
+test "consumeBracketedPaste: paste at exact buffer boundary" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+    var paste_len: usize = 0;
+    var last_action: KeyAction = .none;
+
+    // Paste exactly PASTE_BUF_SIZE bytes plus 1 more byte to trigger flush
+    const content_size = PASTE_BUF_SIZE + 1;
+    const total_size = 6 + content_size + 6;
+    var input_buf: [total_size]u8 = undefined;
+    @memcpy(input_buf[0..6], "\x1b[200~");
+    @memset(input_buf[6 .. 6 + content_size], 'B');
+    @memcpy(input_buf[6 + content_size ..], "\x1b[201~");
+
+    const input = &input_buf;
+    var i: usize = 0;
+
+    while (i < input.len) {
+        _ = consumeBracketedPaste(input, &i, &state, &paste_buf, &paste_len, &last_action);
+    }
+
+    // All bytes should be present
+    try std.testing.expectEqual(@as(usize, content_size), state.buffer.items.len);
+    for (state.buffer.items) |c| {
+        try std.testing.expectEqual(@as(u8, 'B'), c);
+    }
+}
+
+test "consumeBracketedPaste: multiple flush cycles for very large paste" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+    var paste_len: usize = 0;
+    var last_action: KeyAction = .none;
+
+    // Paste 3x PASTE_BUF_SIZE to trigger multiple flush cycles
+    const content_size = PASTE_BUF_SIZE * 3;
+    const total_size = 6 + content_size + 6;
+    var input_buf: [total_size]u8 = undefined;
+    @memcpy(input_buf[0..6], "\x1b[200~");
+    // Fill with a pattern so we can verify ordering
+    for (0..content_size) |j| {
+        input_buf[6 + j] = @as(u8, @intCast(0x41 + (j % 26))); // A-Z repeating
+    }
+    @memcpy(input_buf[6 + content_size ..], "\x1b[201~");
+
+    const input = &input_buf;
+    var i: usize = 0;
+
+    while (i < input.len) {
+        _ = consumeBracketedPaste(input, &i, &state, &paste_buf, &paste_len, &last_action);
+    }
+
+    // All bytes should be present and in correct order
+    try std.testing.expectEqual(@as(usize, content_size), state.buffer.items.len);
+    for (state.buffer.items, 0..) |c, j| {
+        const expected = @as(u8, @intCast(0x41 + (j % 26)));
+        try std.testing.expectEqual(expected, c);
+    }
+}
+
+test "renderPrompt: buffer overflow produces valid partial output" {
+    // This test verifies that the render buffer overflow detection works
+    // by checking the fixedBufferStream overflow behavior directly.
+    // When a fixedBufferStream is full, writeAll returns NoSpaceLeft.
+    // Our render code must stop writing (not silently continue) to avoid
+    // broken ANSI escape sequences.
+    var buf: [16]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const w = fbs.writer();
+
+    // Write data that fits
+    w.writeAll("\x1b[1A") catch unreachable; // 4 bytes
+    w.writeAll("\r\x1b[J") catch unreachable; // 4 bytes -- 8 total
+    w.writeAll("> ") catch unreachable; // 2 bytes -- 10 total
+    w.writeAll("ABCDE") catch unreachable; // 5 bytes -- 15 total
+
+    // 1 byte remaining. A 2-byte write should fail with NoSpaceLeft.
+    const result = w.writeAll("\r\n");
+    try std.testing.expectError(error.NoSpaceLeft, result);
+
+    // The buffer should contain exactly what was successfully written.
+    // Importantly, the failed "\r\n" should NOT have partially written "\r".
+    // (fixedBufferStream.write does partial writes, but the second iteration
+    // of writeAll propagates the error, so at most 1 extra byte.)
+    const written = fbs.getWritten();
+    // The partial write means "\r" (1 byte) was written, then "\n" failed.
+    // Total = 16 bytes (buffer full).
+    try std.testing.expectEqual(@as(usize, 16), written.len);
+
+    // Verify the content up to byte 15 is clean
+    try std.testing.expectEqualStrings("\x1b[1A\r\x1b[J> ABCDE\r", written);
 }

@@ -9,10 +9,10 @@ test:
 	$(ZIG) build test --summary all
 
 fmt:
-	$(ZIG) fmt src/ lib/ 2>/dev/null || $(ZIG) fmt src/
+	$(ZIG) fmt src/ tests/ examples/ build.zig
 
 check:
-	$(ZIG) fmt --check src/ lib/ 2>/dev/null || $(ZIG) fmt --check src/
+	$(ZIG) fmt --check src/ tests/ examples/ build.zig
 
 clean:
 	rm -rf zig-out zig-cache .zig-cache

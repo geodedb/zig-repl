@@ -3,13 +3,36 @@
 
 //! Configuration management
 //!
-//! Handles REPL configuration including:
-//! - Runtime settings
-//! - Persistent configuration files
-//! - Platform-specific config paths
+//! Handles application-level REPL configuration including:
+//! - Persistent settings saved to and loaded from a config file
+//! - Platform-specific config file path resolution
+//! - Runtime preference defaults (keymap, format, history, colors)
+//!
+//! ## Config vs Repl.Options
+//!
+//! `Config` and `Repl.Options` (defined in `core.zig`) serve different purposes
+//! and are separate by design:
+//!
+//! - **`Config`** is for application-level persistence. It supports `loadFromFile()`
+//!   and `saveToFile()` for reading/writing a key=value config file. It contains
+//!   preferences like `max_history`, `colors_enabled`, and `timing_enabled` that
+//!   are relevant to the host application rather than the REPL core.
+//!
+//! - **`Repl.Options`** is for REPL initialization. It is passed to `Repl.run()` and
+//!   contains the allocator, callbacks (`run_fn`, `complete_fn`, `welcome_fn`), and
+//!   session settings (`prompt`, `keymap`, `history_path`).
+//!
+//! `Config` is **not** auto-loaded by `Repl.run()`. Applications that want config
+//! file support should:
+//!
+//! 1. Load a `Config` via `Config.loadFromFile()` or `Config.loadDefault()`
+//! 2. Map relevant fields to `Repl.Options` (e.g., `config.keymap` -> `options.keymap`)
+//! 3. Pass the `Options` to `Repl.run()`
 
 const std = @import("std");
 const builtin = @import("builtin");
+const text_utils = @import("text_utils.zig");
+const isPathSafe = text_utils.isPathSafe;
 const platform = @import("platform.zig");
 
 /// REPL configuration options.
@@ -41,6 +64,10 @@ pub const Config = struct {
         }
     };
 
+    /// Output format selection.
+    ///
+    /// Available for consumers to select output formatting in their applications.
+    /// Not used internally by the REPL core, but part of the public configuration API.
     pub const Format = enum {
         text,
         json,
@@ -65,6 +92,10 @@ pub const Config = struct {
 
     /// Load configuration from a file.
     /// Falls back to defaults if file doesn't exist.
+    ///
+    /// This is a consumer-facing API: the REPL core does not call it internally.
+    /// Applications should call this to load persisted settings, then map the
+    /// relevant fields to `Repl.Options` before calling `Repl.run()`.
     pub fn loadFromFile(allocator: std.mem.Allocator, path: []const u8) !Config {
         var config = Config{};
         config.colors_enabled = platform.shouldUseColor();
@@ -113,12 +144,19 @@ pub const Config = struct {
     }
 
     /// Save configuration to a file.
+    ///
+    /// This is a consumer-facing API: the REPL core does not call it internally.
+    /// Applications can use this to persist user preferences between sessions.
+    ///
+    /// The `allocator` parameter is currently unused but reserved for future use
+    /// (e.g., format conversion, dynamic value serialization). It is kept in the
+    /// signature to avoid a breaking API change when that functionality is added.
     pub fn saveToFile(self: *const Config, allocator: std.mem.Allocator, path: []const u8) !void {
         // Ensure directory exists
         const dir_path = std.fs.path.dirname(path) orelse ".";
         try std.fs.cwd().makePath(dir_path);
 
-        const file = try std.fs.cwd().createFile(path, .{});
+        const file = try std.fs.cwd().createFile(path, .{ .mode = 0o600 });
         defer file.close();
 
         var buf: [4096]u8 = undefined;
@@ -140,6 +178,15 @@ pub const Config = struct {
 };
 
 /// Get the default configuration file path for the application.
+///
+/// This is a consumer-facing API: the REPL core does not call it internally.
+/// Applications can use this with `Config.loadFromFile()` / `Config.saveToFile()`
+/// to resolve platform-appropriate config file locations.
+///
+/// Resolution order:
+/// 1. `$<APP_NAME>_CONFIG` environment variable (validated for safety)
+/// 2. Platform-specific directory (XDG on Linux, ~/Library/Preferences on macOS, %APPDATA% on Windows)
+/// 3. Fallback to `.<app_name>_config` in the current directory
 pub fn getDefaultConfigPath(allocator: std.mem.Allocator, app_name: []const u8) ![]u8 {
     // Check environment variable first (APP_CONFIG)
     var env_name_buf: [256]u8 = undefined;
@@ -147,7 +194,11 @@ pub fn getDefaultConfigPath(allocator: std.mem.Allocator, app_name: []const u8) 
     var full_env_name: [512]u8 = undefined;
     const full_name = std.fmt.bufPrint(&full_env_name, "{s}_CONFIG", .{env_name}) catch app_name;
     if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
-        return path;
+        if (isPathSafe(path)) {
+            return path;
+        }
+        // Path failed validation; free and fall through to defaults
+        allocator.free(path);
     } else |_| {}
 
     // Use platform-specific conventions
@@ -203,3 +254,5 @@ test "format from string" {
     try std.testing.expect(Config.Format.fromString("table") == .table);
     try std.testing.expect(Config.Format.fromString("invalid") == null);
 }
+
+// isPathSafe tests are in text_utils.zig (canonical location)

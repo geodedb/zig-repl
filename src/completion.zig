@@ -11,6 +11,11 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const text_utils = @import("text_utils.zig");
+
+/// Maximum number of file path candidates returned by directory iteration.
+/// Prevents unbounded iteration in large directories (e.g., /usr/bin with thousands of entries).
+pub const MAX_FILE_CANDIDATES = 256;
 
 /// Context for tracking completion state during tab cycling.
 pub const CompletionContext = struct {
@@ -27,7 +32,7 @@ pub const CompletionContext = struct {
     pub fn init(allocator: std.mem.Allocator) CompletionContext {
         return .{
             .allocator = allocator,
-            .candidates = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable,
+            .candidates = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
         };
     }
 
@@ -89,6 +94,10 @@ pub const CompletionContext = struct {
 
 /// Completion provider interface.
 /// Implementations provide candidates for specific contexts.
+///
+/// This is a consumer-facing API: the REPL core does not call it internally.
+/// Library users create and register providers to supply domain-specific
+/// completions (e.g., SQL keywords, shell commands).
 pub const CompletionProvider = struct {
     /// Generate completion candidates for the given context.
     /// Returns true if this provider handled the completion.
@@ -117,6 +126,10 @@ pub const CompletionProvider = struct {
 };
 
 /// Create a completion provider for a static list of keywords.
+///
+/// This is a consumer-facing API: the REPL core does not call it internally.
+/// Library users call this helper to build a `CompletionProvider` backed by a
+/// fixed keyword list (e.g., SQL reserved words, REPL meta-commands).
 pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
     const Impl = struct {
         fn generate(
@@ -231,6 +244,8 @@ pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !
         const candidate = std.fmt.bufPrint(&candidate_buf, "{s}{s}{s}", .{ expanded_prefix, entry.name, suffix }) catch continue;
 
         try ctx.addCandidate(candidate);
+
+        if (ctx.candidates.items.len >= MAX_FILE_CANDIDATES) break;
     }
 
     // Sort candidates for consistent ordering
@@ -244,11 +259,8 @@ pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !
 }
 
 /// Find the start of the current word (for completion).
-pub fn findWordStart(buffer: []const u8, cursor: usize) usize {
-    var word_start: usize = cursor;
-    while (word_start > 0 and !std.ascii.isWhitespace(buffer[word_start - 1])) : (word_start -= 1) {}
-    return word_start;
-}
+/// Delegates to the canonical implementation in text_utils.zig.
+pub const findWordStart = text_utils.findWordStart;
 
 /// Generate candidates from a predefined list that match the prefix.
 pub fn generateCandidatesFromList(ctx: *CompletionContext, prefix: []const u8, options: []const []const u8) !void {
@@ -316,4 +328,46 @@ test "generate candidates from list" {
     try generateCandidatesFromList(&ctx, "ap", &options);
 
     try std.testing.expect(ctx.candidates.items.len == 2);
+}
+
+test "MAX_FILE_CANDIDATES constant is accessible" {
+    // Verify the constant exists and has the expected value
+    try std.testing.expect(MAX_FILE_CANDIDATES == 256);
+}
+
+test "file path candidates limited to MAX_FILE_CANDIDATES" {
+    const allocator = std.testing.allocator;
+
+    // Create a temporary directory with more files than the limit
+    const tmp_dir_path = "/tmp/test_repl_completion_limit";
+
+    // Clean up from any previous run
+    std.fs.cwd().deleteTree(tmp_dir_path) catch {};
+
+    // Create the directory
+    std.fs.cwd().makePath(tmp_dir_path) catch return;
+    defer std.fs.cwd().deleteTree(tmp_dir_path) catch {};
+
+    // Create MAX_FILE_CANDIDATES + 50 files (all starting with the same prefix)
+    const num_files = MAX_FILE_CANDIDATES + 50;
+    for (0..num_files) |i| {
+        var name_buf: [128]u8 = undefined;
+        const name = std.fmt.bufPrint(&name_buf, "{s}/file_{d:0>4}.txt", .{ tmp_dir_path, i }) catch continue;
+        const file = std.fs.cwd().createFile(name, .{}) catch continue;
+        file.close();
+    }
+
+    // Generate file path candidates for the temp directory
+    var ctx = CompletionContext.init(allocator);
+    defer ctx.deinit();
+
+    var prefix_buf: [256]u8 = undefined;
+    const prefix = std.fmt.bufPrint(&prefix_buf, "{s}/file_", .{tmp_dir_path}) catch return;
+
+    try generateFilePathCandidates(&ctx, prefix);
+
+    // The number of candidates should be capped at MAX_FILE_CANDIDATES
+    try std.testing.expect(ctx.candidates.items.len <= MAX_FILE_CANDIDATES);
+    // And since we created more files than the limit, it should be exactly the limit
+    try std.testing.expect(ctx.candidates.items.len == MAX_FILE_CANDIDATES);
 }

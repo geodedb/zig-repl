@@ -29,19 +29,20 @@
 //!     try repl.Repl.run(.{
 //!         .allocator = gpa.allocator(),
 //!         .prompt = ">>> ",
-//!         .execute_fn = executeCommand,
+//!         .run_fn = runCommand,
 //!     });
 //! }
 //!
-//! fn executeCommand(
+//! fn runCommand(
+//!     _: ?*anyopaque,
+//!     _: std.mem.Allocator,
 //!     input: []const u8,
-//!     out: repl.TerminalWriter,
 //!     _: *repl.HistoryStore,
-//!     _: *anyopaque,
-//! ) !repl.KeyAction {
-//!     if (std.mem.eql(u8, input, "quit")) return .quit;
-//!     try out.writeLine(input);
-//!     return .none;
+//! ) anyerror!bool {
+//!     if (std.mem.eql(u8, input, "quit")) return false;
+//!     const stdout = std.io.getStdOut();
+//!     try stdout.writer().print("{s}\n", .{input});
+//!     return true;
 //! }
 //! ```
 //!
@@ -96,7 +97,7 @@
 //! - `TerminalWriter` - Terminal output with color and raw mode support
 //! - `HistoryStore` - Command history with search
 //! - `CompletionContext` - Tab completion results
-//! - `KeyAction` - Execute function return values (`.none`, `.quit`, `.continue_input`)
+//! - `KeyAction` - Internal action enum for key dispatch (user callbacks return `bool`, not `KeyAction`)
 //! - `Color` - Terminal colors (16 colors)
 //! - `Style` - Text styles (bold, dim, italic, underline)
 
@@ -129,6 +130,15 @@ pub const keymap_emacs = @import("keymap_emacs.zig");
 
 /// Vi-style keybinding handlers.
 pub const keymap_vi = @import("keymap_vi.zig");
+
+/// Shared text utility functions for word boundary detection and sanitization.
+pub const text_utils = @import("text_utils.zig");
+
+/// Terminal input parsing (key event decoding).
+pub const input = @import("input.zig");
+
+/// Rendering calculation utilities.
+pub const render = @import("render.zig");
 
 // =============================================================================
 // Core Types
