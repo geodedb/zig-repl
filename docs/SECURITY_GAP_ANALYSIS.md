@@ -1,17 +1,17 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-24 (Phase 11 gap closure)
+**Date:** 2026-03-24 (Phase 12 gap closure)
 **Auditor:** Security Reviewer (automated + manual code review)
-**Scope:** Full source tree at commit `d4a7f33` (branch: main)
+**Scope:** Full source tree at commit `f8eab0c` (branch: main)
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 8 (Phase 11 gap closure -- SF-021, SF-022 resolved)
+**Revision:** 9 (Phase 12 gap closure -- SF-023 resolved)
 
 ---
 
 ## Overall Assessment
 
-**No Critical or High severity findings. Zero open findings. 22 total SF-IDs tracked.**
+**No Critical or High severity findings. Zero open findings. 23 total SF-IDs tracked.**
 
 The Zig REPL library maintains a sound security posture for a v0.1.0 release. The codebase
 is memory-safe by default (Zig's safety checks), has no external C dependencies, and
@@ -29,6 +29,9 @@ Phase 10 validation audit (2026-03-24) confirmed all prior findings remain accur
 Phase 11 gap closure (2026-03-24) resolved SF-021 and SF-022:
 - SF-021: `home_dir_buf` changed to `threadlocal var home_dir_buf` in `src/completion.zig:188`.
 - SF-022: `file.chmod(0o600)` call added after file open in `src/history.zig` to enforce permissions regardless of pre-existing mode.
+
+Phase 12 gap closure (2026-03-24) resolved SF-023:
+- SF-023: `file.chmod(0o600)` call added after file open in `src/config.zig:162` to enforce permissions on pre-existing config files (same class as SF-022).
 All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed
 and confirmed secure.
 
@@ -75,7 +78,7 @@ findings from Phase 5.
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
 | High | 0 | 0 | 0 | 0 | 0 | 30 days |
 | Medium | 6 | 0 | 5 | 0 | 0 | 90 days |
-| Low | 16 | 0 | 12 | 3 | 1 | 180 days |
+| Low | 17 | 0 | 13 | 3 | 1 | 180 days |
 | Info | 0 | 0 | 0 | 0 | 0 | Backlog |
 | **Total** | **22** | **0** | **17** | **3** | **1** | |
 
@@ -216,12 +219,13 @@ Phase 10 performed a validation audit with the following results:
 |-------|----------|------------|--------|--------|
 | SF-021 | Low | 8 | **Resolved** | `threadlocal` added to `home_dir_buf` in `src/completion.zig:188` |
 | SF-022 | Low | 8 | **Resolved** | `chmod(0o600)` added after file open in `src/history.zig` |
+| SF-023 | Low | 8 | **Resolved** | `chmod(0o600)` added after file open in `src/config.zig:162` (same class as SF-022) |
 
-Both findings resolved in Phase 11 gap closure (2026-03-24), well within 180-day SLA.
+SF-021/SF-022 resolved in Phase 11; SF-023 resolved in Phase 12 gap closure (2026-03-24). All within 180-day SLA.
 
 ### Resolved Findings Regression Check
 
-All 15 resolved findings were verified against current source. No regressions detected.
+All 18 resolved findings were verified against current source. No regressions detected.
 
 | SF-ID | Risk | Finding | Regression Status |
 |-------|------|---------|-------------------|

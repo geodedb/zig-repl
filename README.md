@@ -7,7 +7,7 @@ A cross-platform, feature-rich REPL (Read-Eval-Print Loop) library for Zig.
 | Aspect | Info |
 |--------|------|
 | API Stability | Beta |
-| Zig Version | 0.14.0+ |
+| Zig Version | 0.15.x |
 | Platforms | Linux, macOS, Windows |
 
 ## Features
@@ -300,6 +300,7 @@ zig build test
 - `KeyEvent` - Parsed key events
 - `KeyAction` - Internal action enum for key dispatch (not returned by user callbacks)
 - `Keymap` - Keymap selection (`.emacs` or `.vi`)
+- `SyntheticKey` - Named constants for special keys (Insert, Delete, Page Up, Page Down)
 - `Format` - Output format enum (`.text`, `.json`, `.csv`, `.table`)
 
 ### Platform Utilities

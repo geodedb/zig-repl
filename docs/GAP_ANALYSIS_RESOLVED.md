@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 13 -- GAP-0048..GAP-0051 resolved, 51 of 52 gaps closed)
+**Last updated:** 2026-03-24 (Phase 14 -- GAP-0053..GAP-0058 resolved, 57 of 58 gaps closed)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -63,6 +63,12 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0049 | CONTRIBUTING.md docs/ tree incomplete | 2026-03-24 | [#108](https://gitlab.com/devnw/zig/repl/-/issues/108) (closed) |
 | GAP-0050 | README "Current Priorities" lists closed issues #1 and #15 | 2026-03-24 | [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed) |
 | GAP-0051 | README Contributing section lists closed issues #15 and #21 | 2026-03-24 | [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed) |
+| GAP-0053 | GAP_ANALYSIS.md test count stale (257 → 285) | 2026-03-24 | -- (doc staleness) |
+| GAP-0054 | CONTRIBUTING.md project tree missing 10 root-level files | 2026-03-24 | -- (doc gap) |
+| GAP-0055 | SECURITY.md CI scanning list missing Gitleaks | 2026-03-24 | -- (doc gap) |
+| GAP-0056 | SECURITY.md CI scanning list missing SBOM | 2026-03-24 | -- (doc gap) |
+| GAP-0057 | README API Reference missing SyntheticKey type | 2026-03-24 | -- (doc gap) |
+| GAP-0058 | Minimum Zig version inconsistency (0.14.0 → 0.15.0) | 2026-03-24 | -- (doc/manifest discrepancy) |
 
 ---
 

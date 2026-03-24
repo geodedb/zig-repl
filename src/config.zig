@@ -159,6 +159,11 @@ pub const Config = struct {
         const file = try std.fs.cwd().createFile(path, .{ .mode = 0o600 });
         defer file.close();
 
+        // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
+        if (comptime std.fs.has_executable_bit) {
+            file.chmod(0o600) catch {};
+        }
+
         var buf: [4096]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buf);
         const writer = fbs.writer();

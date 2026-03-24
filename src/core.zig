@@ -1173,6 +1173,21 @@ test "processAction: delete_char at end is no-op" {
     try std.testing.expectEqual(@as(usize, 3), state.cursor);
 }
 
+test "processAction: delete_char_forward removes char at cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 1;
+
+    try processAction(&state, .delete_char_forward);
+    try std.testing.expectEqualStrings("ac", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.cursor);
+}
+
 test "processAction: delete_word deletes forward to word boundary and populates kill ring" {
     const allocator = std.testing.allocator;
     var hist = try history_mod.HistoryStore.init(allocator, null, false);

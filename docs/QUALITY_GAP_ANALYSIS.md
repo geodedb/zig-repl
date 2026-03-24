@@ -1,9 +1,9 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-24 (Phase 19 -- QF-026 partial, QF-018/QF-019 won't-do)
-**Audit phase**: Phase 19 -- deferred closure
-**Total findings**: 64 (0 deferred, 4 won't-do, 58 resolved, 1 accepted, 0 open, 1 partial)
+**Last updated**: 2026-03-24 (Phase 20 -- QF-065/QF-066 resolved from full audit)
+**Audit phase**: Phase 20 -- full audit closure
+**Total findings**: 66 (0 deferred, 4 won't-do, 60 resolved, 1 accepted, 0 open, 1 partial)
 
 ---
 
@@ -23,16 +23,16 @@
 | Severity | Count (Total) | Open | Partial | Won't Do | Accepted | Resolved |
 |----------|---------------|------|---------|----------|----------|----------|
 | Critical | 6             | 0    | 0       | 0        | 0        | 6        |
-| High     | 11            | 0    | 1       | 0        | 0        | 10       |
+| High     | 12            | 0    | 1       | 0        | 0        | 11       |
 | Medium   | 25            | 0    | 0       | 2        | 1        | 22       |
-| Low      | 22            | 0    | 0       | 1        | 0        | 21       |
+| Low      | 23            | 0    | 0       | 1        | 0        | 22       |
 
 ### Top Open/Partial/Accepted Risks
 
 1. **Core REPL loop test coverage (partial)** (QF-026, Score 85) -- `processAction` now has 27 dedicated unit tests covering all non-I/O KeyAction variants. `processInput` still needs mock stdin/stdout infrastructure (issue #52).
 2. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
 
-Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
+Phase 20 resolved QF-065 (isStderrTty re-export) and QF-066 (delete_char_forward test). Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
 
 ---
 
@@ -71,6 +71,8 @@ Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed Q
 
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Issue | Resolution | Status |
 |------|-------|----------|-------|----------|---------|-----------|-------|------------|--------|
+| -- | QF-066 | High | 60 | Testing | processAction delete_char_forward untested | core.zig | -- | Added dedicated test for delete_char_forward action; verifies character removal at cursor and cursor stability | Resolved |
+| -- | QF-065 | Low | 20 | APIContract | repl.zig missing isStderrTty re-export | repl.zig | -- | Added `pub const isStderrTty = platform.isStderrTty;` re-export to repl.zig public API | Resolved |
 | -- | QF-064 | Low | 8 | Cleanup | Unused `builtin` import in core.zig | core.zig | -- | Deleted unused `const builtin = @import("builtin")` at line 13 | Resolved |
 | -- | QF-058 | High | 60 | ErrorHandling | handleCompletion insertSlice catch {} advances cursor on OOM | core.zig | [#110](https://gitlab.com/devnw/zig/repl/-/issues/110) | Changed `catch {}` to `catch return` at core.zig:834 | Resolved |
 | -- | QF-059 | Medium | 48 | Correctness | delete_word (Alt+D) missing kill ring save | core.zig | [#111](https://gitlab.com/devnw/zig/repl/-/issues/111) | Added kill ring save to .delete_word handler | Resolved |
@@ -156,6 +158,7 @@ Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed Q
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-066 | 60 | High | processAction delete_char_forward untested -- dedicated test added | Resolved |
 | QF-026 | 85 | High | Core loop test coverage -- processAction: 27 tests; processInput: needs mock harness | Partial |
 | QF-056 | 36 | Medium | Integration tests for undo: 10 tests added covering full type->undo->verify flows | Resolved |
 | QF-025 | 60 | Medium | Keymap tests are no-ops | Resolved |
@@ -219,6 +222,7 @@ Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed Q
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-065 | 20 | Low | repl.zig missing isStderrTty re-export -- added pub const re-export | Resolved |
 | QF-041 | 25 | Low | config.saveToFile allocator documented as reserved for future use | Resolved |
 
 ---

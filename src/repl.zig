@@ -203,6 +203,9 @@ pub const isStdinTty = platform.isStdinTty;
 /// Check if stdout is connected to a TTY (interactive terminal).
 pub const isStdoutTty = platform.isStdoutTty;
 
+/// Check if stderr is connected to a TTY (interactive terminal).
+pub const isStderrTty = platform.isStderrTty;
+
 // =============================================================================
 // Terminal Output
 // =============================================================================

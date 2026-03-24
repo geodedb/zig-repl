@@ -27,8 +27,9 @@ This project implements the following security measures:
 ### CI/CD Security Scanning
 - **SAST**: Static Application Security Testing via GitLab
 - **Secret Detection**: Automated scanning for hardcoded secrets
-- **License Scanning**: Compliance verification for dependencies
+- **Dependency Scanning**: Vulnerability detection for dependencies
 - **Gitleaks**: Enhanced secrets detection
+- **SBOM**: Software Bill of Materials generation and scanning
 
 ### Code Security
 - Memory-safe Zig implementation

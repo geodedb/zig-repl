@@ -148,6 +148,15 @@ repl/
 │   ├── ROADMAP.md               # Project roadmap
 │   └── SECURITY_GAP_ANALYSIS.md # Security gap analysis
 ├── build.zig            # Build configuration
+├── build.zig.zon        # Package manifest
+├── Makefile             # Developer convenience targets
+├── LICENSE              # Apache-2.0 license
+├── CHANGELOG.md         # Release history
+├── SECURITY.md          # Security policy
+├── CODE_OF_CONDUCT.md   # Community standards
+├── CODEOWNERS           # Ownership configuration
+├── NOTICE               # Legal notice
+├── SUPPORT.md           # Support information
 └── README.md            # Project overview
 ```
 
