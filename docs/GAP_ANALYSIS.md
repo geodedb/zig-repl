@@ -1,8 +1,8 @@
 # Gap Analysis Report
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Date:** 2026-03-24 (Phase 6 close-out)
-**Previous audit:** 2026-03-24 (Phase 5 gap sync, 4 open gaps)
+**Date:** 2026-03-24 (Phase 7 close-out -- GAP-0035 resolved)
+**Previous audit:** 2026-03-24 (Phase 6 close-out, 4 open gaps)
 **Auditor:** Principal Engineer Audit (Claude Opus 4.6)
 **Zig Version Installed:** 0.15.2
 **Build Status:** Tests pass (`zig build test` exits 0, 224 tests)
@@ -12,14 +12,14 @@
 ## Summary
 
 - **Total gaps identified (all time):** 37
-- **Resolved (all time):** 33 (GAP-0001..GAP-0003, GAP-0005..GAP-0009, GAP-0011..GAP-0017, GAP-0019..GAP-0028, GAP-0029..GAP-0034, GAP-0036, GAP-0037)
-- **Total open gaps:** 4
+- **Resolved (all time):** 34 (GAP-0001..GAP-0003, GAP-0005..GAP-0009, GAP-0011..GAP-0017, GAP-0019..GAP-0028, GAP-0029..GAP-0037)
+- **Total open gaps:** 3
 - **Carried forward (still open):** 3 (GAP-0004, GAP-0010, GAP-0018)
-- **New gaps (Phase 5):** 3 (GAP-0035, GAP-0036, GAP-0037) -- 2 resolved, moved to GAP_ANALYSIS_RESOLVED.md
+- **New gaps (Phase 5):** 3 (GAP-0035, GAP-0036, GAP-0037) -- all 3 resolved, moved to GAP_ANALYSIS_RESOLVED.md
 - **New gaps (Phase 3):** 10 (GAP-0025..GAP-0034)
 - **Resolved during Phase 1 quick fixes:** 5 (GAP-0027, GAP-0028, GAP-0032, GAP-0033, GAP-0034)
 - **Resolved during previous sync:** 3 (GAP-0029, GAP-0030, GAP-0031 -- moved to GAP_ANALYSIS_RESOLVED.md)
-- **Resolved and moved this cycle:** 2 (GAP-0036, GAP-0037 -- moved to GAP_ANALYSIS_RESOLVED.md)
+- **Resolved and moved this cycle:** 3 (GAP-0035, GAP-0036, GAP-0037 -- moved to GAP_ANALYSIS_RESOLVED.md)
 
 ---
 
@@ -30,33 +30,10 @@
 | GAP-0004 | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) | Medium | CI-CD | CI pipeline not yet verified on runners |
 | GAP-0010 | [#15](https://gitlab.com/devnw/zig/repl/-/issues/15) | Medium | Feature | Windows terminal support incomplete |
 | GAP-0018 | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5), [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Low | Feature | Undo is not real undo |
-| GAP-0035 | [#87](https://gitlab.com/devnw/zig/repl/-/issues/87) | High | CI-CD | Working tree contains 179 uncommitted tests and all gap resolution evidence |
 
 ---
 
-## High Gaps
-
-### GAP-0035: Working Tree Contains 179 Uncommitted Tests and All Gap Resolution Evidence
-
-- **Issue:** [#87](https://gitlab.com/devnw/zig/repl/-/issues/87)
-- **Category:** CI-CD
-- **Severity:** High
-- **Requirement source:** Git workflow guidelines (changes must be committed and pushed)
-- **Current state (evidence):**
-  - `git diff --stat HEAD` -- 17 modified files, 2143 insertions, 763 deletions
-  - `git ls-files --others --exclude-standard` -- 8 untracked files (3 new source, 5 new docs)
-  - At HEAD (`1d8c75d`): `zig build test` -- 45 tests pass (27 + 18)
-  - Working tree: `zig build test` -- 224 tests pass (206 + 18)
-  - New source files: `src/input.zig`, `src/render.zig`, `src/text_utils.zig`
-  - Modified source: `src/completion.zig`, `src/config.zig`, `src/core.zig`, `src/history.zig`, `src/keymap_emacs.zig`, `src/keymap_vi.zig`, `src/parse.zig`, `src/platform.zig`, `src/repl.zig`, `tests/integration.zig`
-  - Modified infra/docs: `.gitlab-ci.yml`, `.pre-commit-config.yaml`, `Makefile`, `README.md`, `SECURITY.md`, `docs/CONTRIBUTING.md`, `docs/ROADMAP.md`
-- **Why this is a gap:** All gap resolution work, refactoring, and 179 new tests exist only in the local working tree and have never been committed or pushed.
-- **Impact/Risk:** High. A disk failure, accidental `git checkout .`, or `git clean -fd` would destroy all evidence and work product.
-- **Recommended fix:**
-  1. Stage and commit all changes (source, tests, docs, infra)
-  2. Push to remote
-  3. Verify CI pipeline passes with 224 tests
-- **Acceptance criteria:** All 25 changed/new files are committed, pushed, and `zig build test` at HEAD shows 224 tests passing.
+_GAP-0035 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
 
 ---
 
@@ -128,7 +105,7 @@
 - **Recommended fix:** Implement an undo stack that records buffer snapshots before destructive operations, as tracked in issue #5.
 - **Acceptance criteria:** Pressing undo restores the buffer to its state before the last destructive edit operation.
 
-_GAP-0036 and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
+_GAP-0035, GAP-0036, and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
 
 ---
 
@@ -137,7 +114,7 @@ _GAP-0036 and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANAL
 | Severity | Count | Gap-IDs |
 |----------|-------|---------|
 | Critical | 0 | -- |
-| High | 1 | GAP-0035 (uncommitted work) |
+| High | 0 | -- |
 | Medium | 2 | GAP-0004 (blocked), GAP-0010 (blocked) |
 | Low | 1 | GAP-0018 (deferred) |
 
@@ -166,6 +143,6 @@ _GAP-0036 and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANAL
 10. **GAP-0018** -- Real undo implementation (tracked in issue #5)
 
 ### Phase 5: New gaps (2026-03-24 sync)
-11. **GAP-0035** -- Commit and push all working tree changes (HIGH -- immediate action needed)
+11. ~~**GAP-0035** -- Commit and push all working tree changes~~ Resolved (issue #87 closed)
 12. ~~**GAP-0036** -- Correct GAP-0024 resolution evidence line counts~~ Resolved (issue #88 closed)
 13. ~~**GAP-0037** -- Update stale test counts in GAP_ANALYSIS.md~~ Resolved (issue #89 closed)

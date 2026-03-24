@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 6 close-out -- GAP-0036, GAP-0037 added)
+**Last updated:** 2026-03-24 (Phase 7 close-out -- GAP-0035 added)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -45,6 +45,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0031 | Issue #64 open but QF-017 marked resolved | 2026-03-24 | [#64](https://gitlab.com/devnw/zig/repl/-/issues/64) (closed) |
 | GAP-0036 | GAP-0024 resolution evidence inaccurate -- core.zig exceeds 800-line guideline | 2026-03-24 | [#88](https://gitlab.com/devnw/zig/repl/-/issues/88) (closed) |
 | GAP-0037 | GAP_ANALYSIS.md test count and evidence numbers stale | 2026-03-24 | [#89](https://gitlab.com/devnw/zig/repl/-/issues/89) (closed) |
+| GAP-0035 | Working tree contains 179 uncommitted tests and all gap resolution evidence | 2026-03-24 | [#87](https://gitlab.com/devnw/zig/repl/-/issues/87) (closed) |
 
 ---
 
@@ -310,6 +311,14 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Category:** Docs
 - **Resolution:** Updated GAP-0004 evidence line test count from "219/132 tests" to "224 tests". Header line 8 already corrected to 224 in previous sync. Historical counts in GAP_ANALYSIS_RESOLVED.md left as-is (point-in-time snapshots).
 - **Evidence:** `docs/GAP_ANALYSIS.md:8` shows "224 tests"; GAP-0004 impact line shows "224 tests".
+- **Resolved date:** 2026-03-24
+
+### GAP-0035: Working Tree Contains 179 Uncommitted Tests and All Gap Resolution Evidence [RESOLVED]
+
+- **Issue:** [#87](https://gitlab.com/devnw/zig/repl/-/issues/87) (closed)
+- **Category:** CI-CD
+- **Resolution:** All 26 changed/new files committed in `eb7fa46` and pushed to `origin/main`. Commit includes source refactoring (input.zig, render.zig, text_utils.zig, search.zig extractions), 179 new tests, documentation updates, and CI infrastructure improvements. 5,093 insertions, 861 deletions across 26 files.
+- **Evidence:** `git log --oneline -1` shows `eb7fa46` at HEAD. `git status` shows clean working tree. `zig build test --summary all` reports 224/224 tests passing.
 - **Resolved date:** 2026-03-24
 
 ---
