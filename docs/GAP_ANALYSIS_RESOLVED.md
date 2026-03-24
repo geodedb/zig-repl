@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 7 close-out -- GAP-0035 added)
+**Last updated:** 2026-03-24 (Phase 8 close-out -- GAP-0004 added)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -46,6 +46,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0036 | GAP-0024 resolution evidence inaccurate -- core.zig exceeds 800-line guideline | 2026-03-24 | [#88](https://gitlab.com/devnw/zig/repl/-/issues/88) (closed) |
 | GAP-0037 | GAP_ANALYSIS.md test count and evidence numbers stale | 2026-03-24 | [#89](https://gitlab.com/devnw/zig/repl/-/issues/89) (closed) |
 | GAP-0035 | Working tree contains 179 uncommitted tests and all gap resolution evidence | 2026-03-24 | [#87](https://gitlab.com/devnw/zig/repl/-/issues/87) (closed) |
+| GAP-0004 | CI pipeline not verified on runners | 2026-03-24 | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) (closed) |
 
 ---
 
@@ -71,6 +72,14 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Category:** Docs
 - **Resolution:** Changed `docs/CONTRIBUTING.md:158` from "MIT License" to "Apache-2.0 License".
 - **Evidence:** `docs/CONTRIBUTING.md` -- all license references now say Apache-2.0
+- **Resolved date:** 2026-03-24
+
+### GAP-0004: CI Pipeline Not Verified on Runners [RESOLVED]
+
+- **Issue:** [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) (closed)
+- **Category:** Infrastructure
+- **Resolution:** Pipeline 2406048174 passed all 10 jobs on GitLab CI runners at commit `168625f`. Jobs verified: build, test (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall), zig-format, secret_detection, security-gitleaks, sbom-generate, sbom-scan.
+- **Evidence:** Pipeline https://gitlab.com/devnw/zig/repl/-/pipelines/2406048174 -- all 10 jobs green
 - **Resolved date:** 2026-03-24
 
 ### GAP-0005: Core REPL Loop Untested [RESOLVED]
