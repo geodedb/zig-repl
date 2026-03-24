@@ -12,6 +12,7 @@
 const std = @import("std");
 const core = @import("core.zig");
 const text_utils = @import("text_utils.zig");
+const SyntheticKey = @import("input.zig").SyntheticKey;
 
 const findWordStart = text_utils.findWordStart;
 const findWordEnd = text_utils.findWordEnd;
@@ -152,7 +153,7 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         },
 
         // Deletion
-        'x' => return .delete_char_forward, // Delete char at cursor
+        'x', SyntheticKey.delete => return .delete_char_forward, // Delete char at cursor / Delete key
         'X' => return .backspace, // Delete char before cursor
         'd' => {
             // Wait for motion (simplified: dd deletes line)
@@ -361,7 +362,6 @@ fn handleInsertMode(state: anytype, key: core.KeyEvent) core.KeyAction {
             'l' => .clear_screen, // Ctrl+L: clear screen
             'i', '\t' => .complete, // Tab: trigger tab completion
             'j', 'm', '\r', '\n' => .run,
-            0x7f - 'a' + 1 => .delete_char_forward, // Delete key
             else => .none,
         };
     }
@@ -386,8 +386,9 @@ fn handleInsertMode(state: anytype, key: core.KeyEvent) core.KeyAction {
     // Special keys
     return switch (key.key) {
         0x7f, 0x08 => .backspace, // Backspace
-        0x05 => .history_first, // Page Up
-        0x06 => .history_last, // Page Down
+        SyntheticKey.delete => .delete_char_forward, // Delete key - forward delete
+        SyntheticKey.page_up => .history_first, // Page Up
+        SyntheticKey.page_down => .history_last, // Page Down
         else => .none,
     };
 }
@@ -756,4 +757,29 @@ test "vi de operator from middle of word" {
     _ = handleKey(&state, .{ .key = 'e' });
     try std.testing.expectEqualStrings("he world", state.buffer.items);
     try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+// =============================================================================
+// Delete key tests (GAP-0045/GAP-0046)
+// =============================================================================
+
+test "vi normal Delete key returns delete_char_forward" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    // Delete key (ESC[3~) → SyntheticKey.delete, no ctrl
+    const action = handleKey(&state, .{ .key = SyntheticKey.delete });
+    try std.testing.expectEqual(core.KeyAction.delete_char_forward, action);
+}
+
+test "vi insert Delete key returns delete_char_forward" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.vi_mode = .insert;
+    state.cursor = 2;
+
+    // Delete key (ESC[3~) → SyntheticKey.delete, no ctrl
+    const action = handleKey(&state, .{ .key = SyntheticKey.delete });
+    try std.testing.expectEqual(core.KeyAction.delete_char_forward, action);
 }

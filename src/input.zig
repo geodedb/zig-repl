@@ -15,6 +15,24 @@ pub const KeyEvent = struct {
     alt: bool = false,
 };
 
+/// Named constants for synthetic key codes used by escape-sequence parsing.
+///
+/// These values represent keys that have no single-byte ASCII encoding.
+/// The input parser maps multi-byte escape sequences (e.g. ESC[3~) to
+/// these synthetic codes so that keymap handlers can distinguish them
+/// from printable characters and control-character combos.
+///
+/// Safety: each value is a low control byte whose raw form (if typed
+/// directly) would be mapped by the control-character handler at line 90
+/// to `{ .key = byte + 'a' - 1, .ctrl = true }`, producing a *different*
+/// KeyEvent. Therefore these codes cannot collide with Ctrl+letter combos.
+pub const SyntheticKey = struct {
+    pub const insert = 0x02; // ESC[2~ → Insert
+    pub const delete = 0x04; // ESC[3~ → Delete (forward delete)
+    pub const page_up = 0x05; // ESC[5~ → Page Up
+    pub const page_down = 0x06; // ESC[6~ → Page Down
+};
+
 /// Parse a raw terminal byte sequence into a KeyEvent.
 pub fn parseKeyEvent(data: []const u8) !KeyEvent {
     if (data.len == 0) return error.NoInput;
@@ -26,10 +44,10 @@ pub fn parseKeyEvent(data: []const u8) !KeyEvent {
                     // Extended sequences: ESC [ n ~
                     if (data.len > 3 and data[3] == '~') {
                         return switch (data[2]) {
-                            '2' => KeyEvent{ .key = 0x02 }, // Insert
-                            '3' => KeyEvent{ .key = 0x7f, .ctrl = true }, // Delete
-                            '5' => KeyEvent{ .key = 0x05 }, // Page Up
-                            '6' => KeyEvent{ .key = 0x06 }, // Page Down
+                            '2' => KeyEvent{ .key = SyntheticKey.insert },
+                            '3' => KeyEvent{ .key = SyntheticKey.delete },
+                            '5' => KeyEvent{ .key = SyntheticKey.page_up },
+                            '6' => KeyEvent{ .key = SyntheticKey.page_down },
                             else => KeyEvent{ .key = data[2] },
                         };
                     }
@@ -227,11 +245,38 @@ test "parseKeyEvent arrow left ESC[D" {
 // Delete key test (ESC [ 3 ~)
 // =============================================================================
 
-test "parseKeyEvent delete key ESC[3~" {
+test "parseKeyEvent delete key ESC[3~ uses SyntheticKey.delete" {
     const ev = try parseKeyEvent("\x1b[3~");
-    try std.testing.expectEqual(@as(u8, 0x7f), ev.key);
-    try std.testing.expect(ev.ctrl);
+    try std.testing.expectEqual(SyntheticKey.delete, ev.key);
+    try std.testing.expect(!ev.ctrl);
     try std.testing.expect(!ev.alt);
+}
+
+test "Delete (ESC[3~) and Ctrl+_ produce different KeyEvents" {
+    // Delete key: ESC[3~ → SyntheticKey.delete, no ctrl
+    const del = try parseKeyEvent("\x1b[3~");
+    // Ctrl+_: raw byte 0x1f → key = 0x1f + 'a' - 1 = 0x7f, ctrl = true
+    const ctrl_underscore = try parseKeyEvent("\x1f");
+
+    // Keys must differ (Delete = 0x04, Ctrl+_ = 0x7f)
+    try std.testing.expect(del.key != ctrl_underscore.key or del.ctrl != ctrl_underscore.ctrl);
+    // Specifically: Delete has its own synthetic code
+    try std.testing.expectEqual(SyntheticKey.delete, del.key);
+    try std.testing.expect(!del.ctrl);
+    // Ctrl+_ maps through the control character handler
+    try std.testing.expectEqual(@as(u8, 0x7f), ctrl_underscore.key);
+    try std.testing.expect(ctrl_underscore.ctrl);
+}
+
+test "Delete (ESC[3~) differs from Backspace (raw 0x7f)" {
+    // Delete key comes through escape sequence path
+    const del = try parseKeyEvent("\x1b[3~");
+    // Backspace sends raw 0x7f which hits the fallback path (>= 0x20 check fails, key=data[0])
+    const bs = try parseKeyEvent(&[_]u8{0x7f});
+
+    try std.testing.expect(del.key != bs.key);
+    try std.testing.expectEqual(SyntheticKey.delete, del.key);
+    try std.testing.expectEqual(@as(u8, 0x7f), bs.key);
 }
 
 // =============================================================================
@@ -377,23 +422,23 @@ test "parseKeyEvent empty input returns error" {
 // Extended sequences: Insert, Page Up, Page Down
 // =============================================================================
 
-test "parseKeyEvent insert ESC[2~" {
+test "parseKeyEvent insert ESC[2~ uses SyntheticKey.insert" {
     const ev = try parseKeyEvent("\x1b[2~");
-    try std.testing.expectEqual(@as(u8, 0x02), ev.key);
+    try std.testing.expectEqual(SyntheticKey.insert, ev.key);
     try std.testing.expect(!ev.ctrl);
     try std.testing.expect(!ev.alt);
 }
 
-test "parseKeyEvent page up ESC[5~" {
+test "parseKeyEvent page up ESC[5~ uses SyntheticKey.page_up" {
     const ev = try parseKeyEvent("\x1b[5~");
-    try std.testing.expectEqual(@as(u8, 0x05), ev.key);
+    try std.testing.expectEqual(SyntheticKey.page_up, ev.key);
     try std.testing.expect(!ev.ctrl);
     try std.testing.expect(!ev.alt);
 }
 
-test "parseKeyEvent page down ESC[6~" {
+test "parseKeyEvent page down ESC[6~ uses SyntheticKey.page_down" {
     const ev = try parseKeyEvent("\x1b[6~");
-    try std.testing.expectEqual(@as(u8, 0x06), ev.key);
+    try std.testing.expectEqual(SyntheticKey.page_down, ev.key);
     try std.testing.expect(!ev.ctrl);
     try std.testing.expect(!ev.alt);
 }

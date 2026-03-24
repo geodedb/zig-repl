@@ -17,6 +17,7 @@ A cross-platform, feature-rich REPL (Read-Eval-Print Loop) library for Zig.
 - **Persistent command history** - saved to disk, searchable
 - **Tab completion** - extensible completion system
 - **Multi-line input** - automatic detection of incomplete statements
+- **Undo support** -- bounded undo stack with Ctrl+_ (Emacs) and u (Vi normal mode)
 - **Bracketed paste mode** - properly handles pasted text
 - **Colored output** - 16-color support with semantic helpers
 - **Cross-platform** - Linux, macOS, and Windows support
@@ -258,6 +259,7 @@ is `true` (which uses a default path based on `app_name`).
 | Ctrl+N | Next history |
 | Ctrl+R | Reverse history search |
 | Ctrl+L | Clear screen |
+| Ctrl+_ | Undo last edit |
 | Tab | Trigger completion |
 
 ### Vi Mode
@@ -272,6 +274,7 @@ is `true` (which uses a default path based on `app_name`).
 | w/b | Move word forward/backward |
 | x | Delete character |
 | dd | Delete line |
+| u | Undo last edit (normal mode) |
 | j/k | Next/previous history |
 | / | Search history |
 

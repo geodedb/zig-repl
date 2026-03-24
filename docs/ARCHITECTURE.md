@@ -25,36 +25,49 @@ This document describes the internal architecture of the Zig REPL Library.
 │  │  ReplState  │  │ processInput│  │    renderPrompt     │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
-          │                    │                    │
-          ▼                    ▼                    ▼
-┌───────────────┐    ┌─────────────────┐    ┌───────────────┐
-│  history.zig  │    │  keymap_*.zig   │    │ platform.zig  │
-│               │    │                 │    │               │
-│ HistoryStore  │    │ handleKey()     │    │ enterRawMode  │
-│ load/save     │    │ Emacs/Vi modes  │    │ getTermWidth  │
-│ search        │    │                 │    │ isStdinTty    │
-└───────────────┘    └─────────────────┘    └───────────────┘
+    │         │              │              │            │
+    ▼         ▼              ▼              ▼            ▼
+┌────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌────────┐
+│history │ │input.zig │ │keymap_*.  │ │render.zig│ │platform│
+│ .zig   │ │          │ │  zig      │ │          │ │ .zig   │
+│        │ │parseKey  │ │           │ │renderLine│ │        │
+│History │ │ Event()  │ │handleKey()│ │calcVisual│ │enterRaw│
+│ Store  │ │escape seq│ │Emacs/Vi   │ │ Lines()  │ │getTerm │
+│load/   │ │ handling │ │modes      │ │cursor    │ │ Width  │
+│ save   │ │          │ │           │ │ calc     │ │isStdin │
+│search  │ │          │ │           │ │          │ │ Tty    │
+└────────┘ └──────────┘ └───────────┘ └──────────┘ └────────┘
                               │
-                              ▼
-                     ┌─────────────────┐
-                     │ completion.zig  │
-                     │                 │
-                     │ CompletionCtx   │
-                     │ addCandidate    │
-                     └─────────────────┘
-                              │
-                              ▼
-                     ┌─────────────────┐
-                     │   parse.zig     │
-                     │                 │
-                     │ isComplete      │
-                     │ isBalanced      │
-                     └─────────────────┘
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+     ┌─────────────┐  ┌────────────┐  ┌─────────────┐
+     │completion.  │  │ search.zig │  │  undo.zig   │
+     │  zig        │  │            │  │             │
+     │Completion   │  │handleSearch│  │ UndoStack   │
+     │ Context     │  │reverse     │  │ push/pop    │
+     │addCandidate │  │ incremental│  │ bounded     │
+     └─────────────┘  └────────────┘  └─────────────┘
+              │                              │
+              ▼                              ▼
+     ┌─────────────┐              ┌──────────────────┐
+     │  parse.zig  │              │  text_utils.zig  │
+     │             │              │                  │
+     │ isComplete  │              │ findWordStart    │
+     │ isBalanced  │              │ findWordEnd      │
+     └─────────────┘              │ sanitizePaste    │
+                                  │ pathSafety       │
+                                  └──────────────────┘
 ```
 
 ## Key Components
 
 ### core.zig - Main REPL Engine
+
+> **Size note:** core.zig exceeds the 800-line soft guideline at ~874 non-test
+> lines. Input parsing, rendering, search, text utilities, and undo have already
+> been extracted into dedicated modules. The remaining code is tightly coupled
+> REPL state management (buffer, cursor, action dispatch, paste handling) that
+> does not decompose further without fragmenting the core event loop.
 
 The core module contains:
 
@@ -67,7 +80,7 @@ The core module contains:
 
 **Input Processing Pipeline:**
 ```
-Raw bytes → parseKeyEvent() → KeyEvent → handleKey() → KeyAction → processAction()
+Raw bytes → parseKeyEvent() [input.zig] → KeyEvent → handleKey() [keymap_*.zig] → KeyAction → processAction()
 ```
 
 ### platform.zig - Platform Abstraction
@@ -115,6 +128,60 @@ Utilities for analyzing input:
 - Bracket/brace/paren balancing
 - Continuation detection (trailing operators)
 - Multi-line input support
+
+### input.zig - Terminal Input Parsing
+
+Handles low-level terminal input:
+
+- **`parseKeyEvent()`**: Converts raw byte sequences into `KeyEvent` values
+- ANSI escape sequence decoding (cursor keys, function keys, etc.)
+- Control character recognition
+- Bracketed paste sequence detection
+
+Called by `core.zig`'s input loop to translate raw stdin bytes into structured key events.
+
+### render.zig - Prompt Rendering
+
+Calculates display layout for prompt and buffer content:
+
+- Visual line and cursor position calculation
+- Line wrapping logic that accounts for prompt width
+- Rendering coordinate math used by `core.zig`'s `renderPrompt()`
+
+Separated from `core.zig` to isolate pure calculation from I/O side effects.
+
+### search.zig - Reverse Incremental Search
+
+Implements Ctrl+R interactive history search:
+
+- **`handleSearch()`**: State machine for search mode input
+- Incremental matching against history entries
+- Search buffer management and result display
+- Integrates with `history.zig`'s `HistoryStore` for backward search
+
+### text_utils.zig - Shared Text Helpers
+
+Common text manipulation utilities used across modules:
+
+- **`findWordStart()` / `findWordEnd()`**: Word boundary detection for Ctrl+W, Alt+B, Alt+F, and Vi word motions
+- **`sanitizePasteContent()`**: Filters unsafe control characters from bracketed paste input
+- **`isUnsafeControlChar()`**: Identifies control characters that should not appear in the edit buffer
+- **`appendHistoryFiltered()`**: Path-safe history appending
+
+Extracted from `core.zig` to keep shared logic in one place and reduce module size.
+
+### undo.zig - Undo Stack
+
+Bounded undo stack for edit buffer snapshots:
+
+- **`UndoStack`**: Fixed-capacity stack of `(buffer, cursor)` snapshots
+- **`push()`**: Duplicates and saves buffer state before destructive edits
+- **`pushOwned()`**: Takes ownership of an already-allocated buffer snapshot
+- **`pop()`**: Restores the most recent snapshot (LIFO order)
+- Oldest entries are automatically evicted when the stack exceeds `max_entries`
+
+Used by `core.zig` to snapshot state before kill, delete, and paste operations.
+Triggered by Ctrl+_ in Emacs mode and `u` in Vi normal mode.
 
 ## Data Flow
 

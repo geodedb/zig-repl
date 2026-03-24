@@ -1,9 +1,9 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-24 (Phase 13 -- QF-015 resolved via GAP-0018 undo stack implementation)
-**Audit phase**: Phase 13 -- GAP-0018 close-out
-**Total findings**: 54 (3 deferred, 2 won't-do, 49 resolved, 0 open)
+**Last updated**: 2026-03-24 (Phase 15 -- QF-055, QF-056, QF-057 resolved; all open findings closed)
+**Audit phase**: Phase 15 -- final close-out
+**Total findings**: 57 (3 deferred, 2 won't-do, 52 resolved, 0 open)
 
 ---
 
@@ -24,14 +24,16 @@
 |----------|---------------|------|----------|----------|----------|
 | Critical | 6             | 0    | 0        | 0        | 6        |
 | High     | 10            | 0    | 1        | 0        | 9        |
-| Medium   | 23            | 0    | 1        | 1        | 21       |
-| Low      | 15            | 0    | 1        | 0        | 14       |
+| Medium   | 24            | 0    | 1        | 1        | 22       |
+| Low      | 17            | 0    | 1        | 0        | 16       |
 
-### Top Deferred Risks
+### Top Open/Deferred Risks
 
 1. **Zero test coverage for core REPL loop (partial)** (QF-026, Score 85) -- `processInput` and `processAction` still need dedicated mock-based test harness. Deferred; requires mock stdin/stdout infrastructure.
 2. **Config.saveToFile/loadFromFile never called** (QF-018, Score 45) -- Documented as consumer-facing API. Not dead code per se.
 3. **Format enum never used at runtime** (QF-019, Score 25) -- Documented as consumer-facing API.
+
+All other findings have been resolved. QF-055 (errdefer), QF-056 (undo integration tests), and QF-057 (SyntheticKey constants) were closed in Phase 15.
 
 ---
 
@@ -39,10 +41,15 @@
 
 ### Open Findings
 
+No open findings. All findings are either Resolved, Deferred, or Won't Do.
+
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Evidence | Issue | Fix Summary | Owner | Effort | Status |
 |------|-------|----------|-------|----------|---------|-----------|----------|-------|-------------|-------|--------|--------|
 | 1 | QF-026 | High | 85 | Testing | Core loop test coverage partial | core.zig | `processInput`, `processAction`: 0 direct tests; ancillary tests exist | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Create test harness with mock stdin/stdout; test each KeyAction path | Maintainers | L | Deferred |
 | 2 | QF-015 | High | 80 | ErrorHandling | .undo replaces buffer with kill ring (not undo) | core.zig, undo.zig | Real undo stack implemented in src/undo.zig, integrated into core.zig. GAP-0018 resolved. | [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Bounded UndoStack (max 100) in src/undo.zig; snapshots before destructive ops; .undo pops and restores | Maintainers | L | Resolved |
+| 3 | QF-056 | Medium | 36 | Testing | No integration tests for undo functionality | tests/integration.zig, undo.zig | 10 integration tests added covering basic undo, undo after delete/paste, stack exhaustion, cursor restore | [#105](https://gitlab.com/devnw/zig/repl/-/issues/105) | Added 10 integration tests for undo: basic, after delete, after paste, stack exhaustion, cursor restore, multiline, empty buffer, sequential, word deletion, kill ring interaction | Maintainers | M | Resolved |
+| 4 | QF-057 | Low | 24 | Readability | Magic values for synthetic key codes | input.zig, keymap_emacs.zig, keymap_vi.zig | SyntheticKey constants defined in input.zig (insert=0x02, delete=0x04, page_up=0x05, page_down=0x06); keymaps import named constants | [#106](https://gitlab.com/devnw/zig/repl/-/issues/106) | Defined `SyntheticKey` constants in input.zig; keymaps import and use named constants instead of magic hex values | Maintainers | S | Resolved |
+| 5 | QF-055 | Low | 8 | ErrorHandling | UndoStack.push memory leak on append failure | undo.zig | errdefer added after allocator.dupe() to free buf_copy on entries.append() OOM | [#104](https://gitlab.com/devnw/zig/repl/-/issues/104) | Added `errdefer self.allocator.free(buf_copy)` after dupe in push() | Maintainers | S | Resolved |
 | 3 | QF-053 | High | 60 | ErrorHandling | flushPasteBuffer `catch {}` on insertSlice silently loses paste + cursor invariant violated | core.zig | L470: `insertSlice(...) catch {}`; L471: `cursor += sanitized.len` runs regardless of insert success | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Changed `catch {}` to `catch return` so cursor advancement is guarded on insertSlice success | Maintainers | S | Resolved |
 | 4 | QF-052 | Medium | 48 | Correctness | handleSearch reads 256 bytes but processes only search_buf[0], discarding bytes 1..n | core.zig | L802-808: `const n = try stdin.read(&search_buf)` then `const c = search_buf[0]`; bytes 1..n lost | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Wrapped character processing in `for (search_buf[0..n])` loop; all bytes now processed | Maintainers | S | Resolved |
 | 5 | QF-018 | Medium | 45 | DeadCode | Config.saveToFile/loadFromFile never called | config.zig | Lines 68-171: defined but no callers; documented as consumer API | -- | Documented as consumer API; see #39 | Maintainers | S | Deferred |
@@ -112,7 +119,7 @@
 
 ## Findings by Category
 
-### Reliability (1 open finding)
+### Reliability (0 open findings)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
@@ -130,6 +137,7 @@
 | QF-003 | 50 | Medium | processAction 228-line switch | Resolved |
 | QF-051 | 36 | Medium | processAction 231 lines -> 159 lines; handleCompletion/handleUnindent extracted | Resolved |
 | QF-004 | 45 | Medium | handleNormalMode 257 lines -> 158 lines (extracted handlePendingOperator) | Resolved |
+| QF-057 | 24 | Low | Magic values for synthetic key codes -- SyntheticKey constants defined in input.zig | Resolved |
 | QF-042 | 20 | Low | platform.zig 812 lines -> 796 lines (under 800 guideline) | Resolved |
 | QF-044 | 16 | Low | renderPrompt bare `[8192]u8` magic number | Resolved |
 | QF-045 | 16 | Low | paste_buf bare `[4096]u8` magic number | Resolved |
@@ -149,6 +157,7 @@
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
 | QF-026 | 85 | High | Core loop test coverage partial | Deferred |
+| QF-056 | 36 | Medium | Integration tests for undo: 10 tests added covering full type->undo->verify flows | Resolved |
 | QF-025 | 60 | Medium | Keymap tests are no-ops | Resolved |
 | QF-048 | 40 | Medium | CI cache added: global `cache:` block with `key: zig-${ZIG_VERSION}` | Resolved |
 | QF-046 | 36 | Medium | render.zig: 26 tests added covering tabWidth, calculateVisualLines, calculateCursorPosition | Resolved |
@@ -161,6 +170,7 @@
 | QF-015 | 80 | High | .undo replaces buffer with kill ring -- real undo stack implemented (GAP-0018) | Resolved |
 | QF-053 | 60 | High | flushPasteBuffer `catch return` guards cursor on OOM | Resolved |
 | QF-014 | 45 | Medium | Vi kill ring catch {} on alloc | Won't Do |
+| QF-055 | 8 | Low | UndoStack.push memory leak on append failure -- errdefer added | Resolved |
 
 ### Correctness (0 open findings)
 
@@ -224,12 +234,15 @@
 | QF-042 | 20 | Merged constant tests + trimmed redundant comments; 812 -> 796 lines | -- | Resolved |
 | QF-044 | 16 | Extract `const RENDER_BUF_SIZE = 8192` in core.zig | -- | Resolved |
 | QF-045 | 16 | Extract `const PASTE_BUF_SIZE = 4096` in core.zig | -- | Resolved |
+| QF-057 | 24 | Defined `SyntheticKey` constants in input.zig (insert=0x02, delete=0x04, page_up=0x05, page_down=0x06); keymaps import named constants | [#106](https://gitlab.com/devnw/zig/repl/-/issues/106) | Resolved |
 | QF-043 | 16 | Extracted shared `findEndOfWord` helper; both `de` and `e` use it | -- | Resolved |
+| QF-055 | 8 | Added `errdefer self.allocator.free(buf_copy)` after dupe in push() | [#104](https://gitlab.com/devnw/zig/repl/-/issues/104) | Resolved |
 
 ### Medium (1-5 days)
 
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
+| QF-056 | 36 | Added 10 integration tests for undo: basic, after delete/paste, stack exhaustion, cursor restore, multiline, sequential, word deletion, kill ring | [#105](https://gitlab.com/devnw/zig/repl/-/issues/105) | Resolved |
 | QF-004 | 45 | Extracted `handlePendingOperator`; handleNormalMode 257 -> 158 lines | [#56](https://gitlab.com/devnw/zig/repl/-/issues/56) | Resolved |
 
 ### Strategic (> 5 days)
@@ -267,15 +280,18 @@
 | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Bug: handleSearch reads 256 bytes but processes only first byte | QF-052 (Resolved, issue closed) |
 | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Bug: flushPasteBuffer silently loses pasted content on OOM | QF-053 (Resolved, issue closed) |
 | [#94](https://gitlab.com/devnw/zig/repl/-/issues/94) | Build: apt-get runs redundantly in all 7 CI jobs | QF-054 (Resolved, issue closed) |
+| [#104](https://gitlab.com/devnw/zig/repl/-/issues/104) | QF-055: UndoStack.push memory leak on append failure | QF-055 (Resolved) |
+| [#105](https://gitlab.com/devnw/zig/repl/-/issues/105) | QF-056: No integration tests for undo functionality | QF-056 (Resolved) |
+| [#106](https://gitlab.com/devnw/zig/repl/-/issues/106) | QF-057: Magic values for synthetic key codes | QF-057 (Resolved) |
 
 ### Pre-existing Related Issues
 
 | Existing Issue | Related Findings |
 |----------------|-----------------|
 | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1) Set up CI/CD pipeline | QF-048, QF-054 |
-| [#2](https://gitlab.com/devnw/zig/repl/-/issues/2) Add comprehensive unit tests | QF-026, QF-046, QF-047 |
+| [#2](https://gitlab.com/devnw/zig/repl/-/issues/2) Add comprehensive unit tests | QF-026, QF-046, QF-047, QF-056 |
 | [#4](https://gitlab.com/devnw/zig/repl/-/issues/4) Set up test coverage reporting | QF-026 |
-| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) Implement full undo/redo stack | QF-015 (Resolved) |
+| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) Implement full undo/redo stack | QF-015 (Resolved), QF-055 (Resolved), QF-056 (Resolved) |
 | [#19](https://gitlab.com/devnw/zig/repl/-/issues/19) Improve signal handling | QF-024 (Resolved), QF-032 (Resolved) |
 | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) Write API documentation | QF-020, QF-021, QF-022 (all Resolved) |
 | [#39](https://gitlab.com/devnw/zig/repl/-/issues/39) Config module disconnected | QF-023 (Resolved), QF-018 (Deferred) |
@@ -403,6 +419,30 @@
 - All remaining open items are deferred with documented rationale.
 - Zero open findings. 48 resolved, 4 deferred, 2 won't-do.
 
+### Phase 12 -> Phase 14 (Phase 3 Deep Review)
+
+| Metric | Phase 12 (2026-03-24 close-out) | Phase 14 (2026-03-24 deep review) | Delta |
+|--------|--------------------------------|-----------------------------------|-------|
+| Total findings | 54 | 57 | +3 new |
+| Open findings | 4 (all deferred) | 7 (3 deferred + 1 open medium + 2 open low) | +3 new open |
+| Resolved findings | 48 | 49 | 0 |
+| Won't Do | 2 | 2 | 0 |
+| Deferred | 4 | 3 | 0 |
+| Critical (open) | 0 | 0 | 0 |
+| High (open) | 2 (deferred) | 1 (deferred) | 0 |
+| Medium (open) | 1 (deferred) | 2 (1 deferred + 1 new) | +1 |
+| Low (open) | 1 (deferred) | 3 (1 deferred + 2 new) | +2 |
+| Highest open score | 85 (QF-026, deferred) | 85 (QF-026, deferred) | 0 |
+| New issues created | -- | 3 (#104, #105, #106) | +3 |
+
+**Key observations:**
+- 3 new findings from Phase 3 deep review of undo stack and key handling.
+- QF-055 (Score 8, Low): Memory leak on rare OOM path in UndoStack.push -- missing `errdefer` after `allocator.dupe()`. Quick fix, extremely rare trigger.
+- QF-056 (Score 36, Medium): No integration tests for undo functionality. The Delete key collision (GAP-0045) would have been caught by such tests. Medium effort due to test harness dependency.
+- QF-057 (Score 24, Low): Synthetic key codes (0x02, 0x05, 0x06, 0x7f) are magic numbers across 3 files. Named constants would improve readability and reduce sync risk. Quick fix.
+- No new Critical or High findings. The codebase's critical/high-severity issues remain stable.
+- QF-056 is related to the deferred QF-026 (core loop test coverage) but is scoped specifically to undo, which can be tested without full mock stdin/stdout infrastructure.
+
 ---
 
 **Key observations (Phase 5 -> Phase 6):**
@@ -436,6 +476,10 @@ All findings tagged `confidence::confirmed` were verified by direct code inspect
 - QF-052 handleSearch single-byte bug verified: L802 `var search_buf: [256]u8`, L805 `const n = try stdin.read(&search_buf)`, L808 `const c = search_buf[0]` -- only index 0 used.
 - QF-053 flushPasteBuffer cursor bug verified: L470 `insertSlice(...) catch {}`, L471 `state.cursor += sanitized.len` -- cursor advances unconditionally.
 - QF-054 apt-get redundancy verified: L49 `apt-get update && apt-get install -y curl xz-utils` outside cache guard; 7 `*install-zig` references counted.
+
+- QF-055 UndoStack.push leak verified: `src/undo.zig:61` `const buf_copy = try self.allocator.dupe(u8, buffer)` followed by `try self.entries.append(...)` at L62 -- no `errdefer` between them. If append fails, buf_copy is leaked.
+- QF-056 no undo integration tests verified: `grep "undo" tests/integration.zig` = 0 matches. Unit tests exist in `src/undo.zig` but no end-to-end tests exercising keymap -> core -> undo path.
+- QF-057 magic key codes verified: `src/input.zig:29-32` uses `0x02`, `0x05`, `0x06`, `0x7f`; `src/keymap_emacs.zig:79-81` switches on same values; `src/keymap_vi.zig:388-390` likewise. No named constants defined.
 
 No `confidence::suspected` findings remain -- all claims verified against source.
 

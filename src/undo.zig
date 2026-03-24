@@ -59,6 +59,7 @@ pub const UndoStack = struct {
         }
 
         const buf_copy = try self.allocator.dupe(u8, buffer);
+        errdefer self.allocator.free(buf_copy);
         try self.entries.append(self.allocator, .{
             .buffer = buf_copy,
             .cursor = cursor,

@@ -45,6 +45,10 @@ pub const Format = @import("config.zig").Config.Format;
 /// Key event from terminal input (defined in input.zig)
 pub const KeyEvent = input_mod.KeyEvent;
 
+/// Named constants for synthetic key codes (Insert, Delete, Page Up, Page Down).
+/// Defined in input.zig; re-exported for consumers of the public API.
+pub const SyntheticKey = input_mod.SyntheticKey;
+
 /// Action to perform in response to a key
 pub const KeyAction = enum {
     none,

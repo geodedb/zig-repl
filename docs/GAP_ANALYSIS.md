@@ -1,55 +1,32 @@
 # Gap Analysis Report
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Date:** 2026-03-24 (Phase 9 -- GAP-0010 and GAP-0018 resolved, all gaps closed)
-**Previous audit:** 2026-03-24 (Phase 8 close-out, 2 open gaps)
+**Date:** 2026-03-24 (Phase 10 -- all 9 Phase 9 gaps resolved, full close-out)
+**Previous audit:** 2026-03-24 (Phase 9, 9 open gaps)
 **Auditor:** Principal Engineer Audit (Claude Opus 4.6)
 **Zig Version Installed:** 0.15.2
-**Build Status:** Tests pass (`zig build test` exits 0, 241 tests)
+**Build Status:** Tests pass (`zig build test` exits 0, 257 tests)
 
 ---
 
 ## Summary
 
-- **Total gaps identified (all time):** 37
-- **Resolved (all time):** 37 (GAP-0001..GAP-0037) -- ALL GAPS CLOSED
+- **Total gaps identified (all time):** 46
+- **Resolved (all time):** 46 (GAP-0001..GAP-0046)
 - **Total open gaps:** 0
 - **Carried forward (still open):** 0
-- **New gaps (Phase 5):** 3 (GAP-0035, GAP-0036, GAP-0037) -- all 3 resolved, moved to GAP_ANALYSIS_RESOLVED.md
-- **New gaps (Phase 3):** 10 (GAP-0025..GAP-0034)
-- **Resolved during Phase 1 quick fixes:** 5 (GAP-0027, GAP-0028, GAP-0032, GAP-0033, GAP-0034)
-- **Resolved during previous sync:** 3 (GAP-0029, GAP-0030, GAP-0031 -- moved to GAP_ANALYSIS_RESOLVED.md)
-- **Resolved and moved this cycle:** 5 (GAP-0035, GAP-0036, GAP-0037, GAP-0010, GAP-0018 -- moved to GAP_ANALYSIS_RESOLVED.md)
+- **Resolved this phase:** 9 (GAP-0038..GAP-0046, all Phase 9 gaps closed in Phase 10)
+- **Previous resolved cycles:** 37 gaps resolved across Phases 1-8; 9 gaps resolved in Phase 10. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
 
 ---
 
 ## Gap Index (Open Only)
 
-No open gaps. All 37 gaps resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md).
+No open gaps. All 46 gaps (GAP-0001 through GAP-0046) have been resolved. See [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md) for full resolution history.
 
 ---
 
-_GAP-0035 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
-
----
-
-## Medium Gaps
-
-_GAP-0004 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
-
-_GAP-0010 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
-
----
-
-## Low Gaps
-
-_GAP-0018 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
-
-_GAP-0035, GAP-0036, and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)._
-
----
-
-## Gap Priority Matrix
+## Gap Priority Matrix (Open Only)
 
 | Severity | Count | Gap-IDs |
 |----------|-------|---------|
@@ -57,6 +34,14 @@ _GAP-0035, GAP-0036, and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.m
 | High | 0 | -- |
 | Medium | 0 | -- |
 | Low | 0 | -- |
+
+---
+
+## Detailed Gap Sections
+
+All 9 Phase 9 gaps (GAP-0038 through GAP-0046) have been resolved and moved to
+[GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md). See that file for full resolution
+details, evidence, and resolved dates.
 
 ---
 
@@ -86,3 +71,14 @@ _GAP-0035, GAP-0036, and GAP-0037 resolved and moved to [GAP_ANALYSIS_RESOLVED.m
 11. ~~**GAP-0035** -- Commit and push all working tree changes~~ Resolved (issue #87 closed)
 12. ~~**GAP-0036** -- Correct GAP-0024 resolution evidence line counts~~ Resolved (issue #88 closed)
 13. ~~**GAP-0037** -- Update stale test counts in GAP_ANALYSIS.md~~ Resolved (issue #89 closed)
+
+### Phase 6: Post-resolution audit gaps (2026-03-24) -- COMPLETED
+14. ~~**GAP-0045** -- Fix Delete key collision with undo in Emacs mode (High, Bug)~~ Resolved (SyntheticKey.delete=0x04)
+15. ~~**GAP-0046** -- Fix Delete key dead binding in Vi insert mode (High, Bug)~~ Resolved (same root cause)
+16. ~~**GAP-0042** -- Add 5 missing modules to ARCHITECTURE.md (Medium, Docs)~~ Resolved
+17. ~~**GAP-0038** -- Add undo.zig to CONTRIBUTING.md tree (Low, Docs)~~ Resolved
+18. ~~**GAP-0039** -- Add Ctrl+_ to README Emacs keybindings (Low, Docs)~~ Resolved
+19. ~~**GAP-0040** -- Add u to README Vi keybindings (Low, Docs)~~ Resolved
+20. ~~**GAP-0041** -- Reduce core.zig below 800 lines or document exception (Low, Code Quality)~~ Resolved (justified in ARCHITECTURE.md)
+21. ~~**GAP-0043** -- Update ROADMAP.md stale issue statuses (Low, Docs)~~ Resolved
+22. ~~**GAP-0044** -- Add undo to README Features list (Low, Docs)~~ Resolved

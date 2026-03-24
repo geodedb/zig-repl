@@ -153,6 +153,10 @@ pub const ReplState = core.ReplState;
 /// Parsed keyboard event (character, control key, arrow, etc.).
 pub const KeyEvent = core.KeyEvent;
 
+/// Named constants for synthetic key codes produced by escape sequences.
+/// Use these instead of raw hex values when matching Insert, Delete, Page Up, or Page Down.
+pub const SyntheticKey = core.SyntheticKey;
+
 /// Return value from execute function to control REPL behavior.
 /// - `.none` - Continue normally
 /// - `.quit` - Exit the REPL

@@ -12,7 +12,7 @@ Establish comprehensive test coverage, CI/CD pipeline, and quality metrics.
 
 | Issue | Title | Priority | Status |
 |-------|-------|----------|--------|
-| [#1](https://gitlab.com/devnw/zig/repl/-/issues/1) | Set up CI/CD pipeline | High | Open |
+| [#1](https://gitlab.com/devnw/zig/repl/-/issues/1) | Set up CI/CD pipeline | High | Closed |
 | [#2](https://gitlab.com/devnw/zig/repl/-/issues/2) | Add comprehensive unit tests | High | Open |
 | [#3](https://gitlab.com/devnw/zig/repl/-/issues/3) | Add integration tests | Medium | Open |
 | [#4](https://gitlab.com/devnw/zig/repl/-/issues/4) | Set up test coverage reporting | Medium | Open |
@@ -23,7 +23,7 @@ Improve input handling, keybindings, and editing capabilities.
 
 | Issue | Title | Priority | Status |
 |-------|-------|----------|--------|
-| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Implement full undo/redo stack | Medium | Open |
+| [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Implement full undo/redo stack | Medium | Closed |
 | [#6](https://gitlab.com/devnw/zig/repl/-/issues/6) | Add configurable keybindings | Low | Open |
 | [#7](https://gitlab.com/devnw/zig/repl/-/issues/7) | Implement transpose characters (Ctrl+T) | Low | Open |
 | [#8](https://gitlab.com/devnw/zig/repl/-/issues/8) | Add word case operations | Low | Open |

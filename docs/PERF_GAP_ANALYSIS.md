@@ -1,8 +1,8 @@
 # Performance Gap Analysis -- devnw/zig/repl
 
 **Project:** gitlab.com/devnw/zig/repl
-**Last updated:** 2026-03-24 (Phase 10 close-out -- PF-027, PF-028, PF-035 confirmed resolved)
-**Audit phase:** Phase 10 -- 10 new findings added (3 P3, 7 Info); 3 resolved this cycle
+**Last updated:** 2026-03-24 (Phase 9 audit -- PF-038 added as Info)
+**Audit phase:** Phase 9 audit -- 1 new Info finding added (PF-038); no severity changes
 **Methodology:** Static code analysis with PerfScore framework
 
 ---
@@ -15,12 +15,12 @@
 |----------|------|----------|-------|-------------|
 | P0       | 0    | 1        | 1     | SLO breach / outage risk -- immediate action |
 | P1       | 0    | 3        | 3     | Material user-facing impact -- within sprint |
-| P2       | 1    | 6        | 7     | Moderate impact / cost -- next quarter |
-| P3       | 6    | 8        | 14    | Minor optimization -- backlog |
-| Info     | 10   | 2        | 12    | Hardening / best practice -- as capacity allows |
-| **Total**| **17** | **20** | **37** | |
+| P2       | 1    | 5        | 6     | Moderate impact / cost -- next quarter |
+| P3       | 7    | 7        | 14    | Minor optimization -- backlog |
+| Info     | 11   | 2        | 13    | Hardening / best practice -- as capacity allows |
+| **Total**| **19** | **18** | **37** | |
 
-**Progress since Phase 9:** Added 10 new findings from performance review (PF-027 through PF-036): 3 P3 and 7 Info severity. Resolved PF-027 (preallocation), PF-028 (skip early lines), PF-035 (apt-get guard). 20 of 37 total findings resolved.
+**Progress since Phase 9:** Added PF-038 (Info) from Phase 3 deep review -- undo pre-snapshot alloc+free on non-destructive keypresses downgraded from P2 to Info. 18 of 37 total findings resolved. 19 open (1 P2, 7 P3, 11 Info). Also corrected P2 resolved count (was 6, actually 5) and P3 open/resolved split (was 6/8, actually 7/7).
 
 ### Top 5 Open Risks by Expected Impact
 
@@ -61,7 +61,8 @@
 | 21 | PF-033 | Info | -- | shouldUseColor() calls 2 getenv + 1 isatty per TerminalWriter init | platform.zig:269-283,357 | `getenv("NO_COLOR")`, `getenv("TERM")`, `isStdoutTty()` called in `shouldUseColor()` which is called in every `TerminalWriter.init()` | -- | Cache result in module-level `var` on first call; environment does not change during process lifetime | Deferred |
 | 22 | PF-034 | Info | -- | Config.loadFromFile no pre-size-check for readToEndAlloc | config.zig:109 | `file.readToEndAlloc(allocator, 1024 * 1024)` reads without checking file size first; may over-allocate for small config files | -- | Call `file.getEndPos()` first and allocate exact size, or use smaller initial max (e.g. 64KB for config) | Deferred |
 | 23 | PF-036 | Info | -- | Build job missing --summary all flag for test output | .gitlab-ci.yml:92 | `zig build` without `--summary all`; no build summary in CI logs for diagnosing slow compilation | -- | Add `--summary all` to build command for visibility into compilation steps | Deferred |
-| ~~24~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
+| 24 | PF-038 | Info | -- | Undo pre-snapshot alloc+free on non-destructive keypresses | core.zig:371,393-394 | `allocator.dupe()` runs on every keypress; freed immediately at line 394 for non-destructive actions (~15-40% of keypresses). Cost ~100-300ns per wasted cycle; terminal I/O syscalls are 100-1000x more expensive | -- | Conditional dupe (only allocate after action is classified as destructive). Not worth the complexity -- adds a second keymap dispatch or deferred snapshot pattern for sub-microsecond gain | Deferred |
+| ~~25~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
 
 ### Resolved Findings
 
@@ -122,6 +123,7 @@
 | PF-032 | Info | -- | history.zig | Two writeAll syscalls in history append | Deferred |
 | PF-033 | Info | -- | platform.zig | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter | Deferred |
 | PF-034 | Info | -- | config.zig | Config.loadFromFile no pre-size-check | Deferred |
+| PF-038 | Info | -- | core.zig | Undo pre-snapshot alloc+free on non-destructive keypresses | Deferred |
 
 ### Infrastructure (`area::infra`)
 
@@ -191,7 +193,7 @@
 | PF-011 | P3 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Deferred |
 | PF-012 | Info | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) | Resolved |
 
-*Note: PF-021 through PF-036 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*
+*Note: PF-021 through PF-038 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*
 
 ---
 
@@ -199,6 +201,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 (Phase 9 audit) | Phase 9 audit: added PF-038 (Info) -- undo pre-snapshot alloc+free on non-destructive keypresses. Originally flagged as P2 by Phase 2 scanner, downgraded to Info by Phase 3 deep reviewer. Absolute cost ~100-300ns per non-destructive keypress; terminal I/O syscalls are 100-1000x more expensive. Persistent shadow buffer fix adds complexity for near-zero gain. No GitLab issue created (Info-level). Updated severity distribution (37 total, 19 open, 18 resolved). Corrected pre-existing count errors: P2 resolved 6->5 (total 7->6), P3 open/resolved 6/8->7/7. |
 | 2026-03-24 (Phase 10) | Phase 10 performance review: added 10 new findings (PF-027 through PF-036). 3 P3 findings: PF-027 (history ArrayList no preallocation, Score 20), PF-028 (history load dupes all lines then frees excess, Score 25), PF-035 (apt-get install in every CI job, Score 20). 7 Info findings: PF-029 (appendToMultiLine no pre-allocate), PF-030 (search_buffer capacity 0), PF-031 (ReplState buffers capacity 0), PF-032 (two writeAll syscalls in history append), PF-033 (shouldUseColor 2 getenv + 1 isatty), PF-034 (Config.loadFromFile no pre-size-check), PF-036 (build job missing --summary all). No GitLab issues created -- all findings are P3/Info backlog. Updated severity distribution (37 total, 20 open, 17 resolved), top 5 risks, roadmap. |
 | 2026-03-24 (Phase 6) | Phase 6 re-audit: resolved PF-012 (CI now has build + 4 test stages + fuzz). Added 6 new findings: PF-021 (ioctl per render), PF-022 (global dedup O(k*n)), PF-023 (search mode direct stdout writes), PF-024 (CI Zig re-download), PF-025 (byte-by-byte fixedBufferStream writes), PF-026 (history search full re-scan per keystroke). Updated severity distribution, roadmap split into Quick Wins / Medium / Strategic tiers. No new GitLab issues -- all new findings are P3/Info backlog. |
 | 2026-03-24 (post-closure) | Phase 5 gap closure: resolved PF-015 (replaceRange for vi word ops), PF-016 (replaceRange for delete_to_bol), PF-018 (ensureTotalCapacity for history filter), PF-020 (replaceRange for reverse_tab). Updated PF-009 component from core.zig to render.zig. Updated severity distribution, roadmap, and status for all remaining items. |

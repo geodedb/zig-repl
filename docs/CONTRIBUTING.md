@@ -125,6 +125,7 @@ repl/
 │   ├── keymap_vi.zig    # Vi keybindings
 │   ├── config.zig       # Configuration types
 │   ├── text_utils.zig   # Shared text helpers (word boundaries, sanitization)
+│   ├── undo.zig         # Undo stack for edit buffer snapshots
 │   └── example.zig      # Example application
 ├── examples/
 │   ├── basic.zig        # Basic REPL usage

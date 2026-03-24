@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const core = @import("core.zig");
+const SyntheticKey = @import("input.zig").SyntheticKey;
 
 /// Handle a key event in Emacs mode.
 /// Returns the action to perform, potentially modifying state for insert actions.
@@ -76,9 +77,10 @@ pub fn handleKey(state: anytype, key: core.KeyEvent) core.KeyAction {
     return switch (key.key) {
         0x1b => .none, // ESC: do nothing in Emacs mode
         0x7f, 0x08 => .backspace, // Backspace (DEL or BS)
-        0x02 => .none, // Insert key - no action in emacs mode
-        0x05 => .history_first, // Page Up - go to first history
-        0x06 => .history_last, // Page Down - go to last history
+        SyntheticKey.insert => .none, // Insert key - no action in emacs mode
+        SyntheticKey.delete => .delete_char_forward, // Delete key - forward delete
+        SyntheticKey.page_up => .history_first, // Page Up - go to first history
+        SyntheticKey.page_down => .history_last, // Page Down - go to last history
         else => .none,
     };
 }
@@ -338,4 +340,28 @@ test "emacs Ctrl+_ returns undo" {
     // Ctrl+_ sends raw 0x1f which the input parser maps to key=0x7f, ctrl=true
     const action = handleKey(&state, .{ .key = 0x7f, .ctrl = true });
     try std.testing.expectEqual(core.KeyAction.undo, action);
+}
+
+test "emacs Delete key returns delete_char_forward" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    // Delete key (ESC[3~) → SyntheticKey.delete, no ctrl
+    const action = handleKey(&state, .{ .key = SyntheticKey.delete });
+    try std.testing.expectEqual(core.KeyAction.delete_char_forward, action);
+}
+
+test "emacs Delete and Ctrl+_ produce different actions" {
+    var state = try TestState.initWithContent(std.testing.allocator, "hello");
+    defer state.deinit();
+    state.cursor = 2;
+
+    // Delete key → delete_char_forward
+    const del_action = handleKey(&state, .{ .key = SyntheticKey.delete });
+    try std.testing.expectEqual(core.KeyAction.delete_char_forward, del_action);
+
+    // Ctrl+_ → undo (key=0x7f, ctrl=true)
+    const undo_action = handleKey(&state, .{ .key = 0x7f, .ctrl = true });
+    try std.testing.expectEqual(core.KeyAction.undo, undo_action);
 }
