@@ -27,16 +27,16 @@ This document describes the internal architecture of the Zig REPL Library.
 └─────────────────────────────────────────────────────────────┘
     │         │              │              │            │
     ▼         ▼              ▼              ▼            ▼
-┌────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌────────┐
-│history │ │input.zig │ │keymap_*.  │ │render.zig│ │platform│
-│ .zig   │ │          │ │  zig      │ │          │ │ .zig   │
-│        │ │parseKey  │ │           │ │renderLine│ │        │
-│History │ │ Event()  │ │handleKey()│ │calcVisual│ │enterRaw│
-│ Store  │ │escape seq│ │Emacs/Vi   │ │ Lines()  │ │getTerm │
-│load/   │ │ handling │ │modes      │ │cursor    │ │ Width  │
-│ save   │ │          │ │           │ │ calc     │ │isStdin │
-│search  │ │          │ │           │ │          │ │ Tty    │
-└────────┘ └──────────┘ └───────────┘ └──────────┘ └────────┘
+┌────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌────────┐ ┌────────┐
+│history │ │input.zig │ │keymap_*.  │ │render.zig│ │platform│ │config  │
+│ .zig   │ │          │ │  zig      │ │          │ │ .zig   │ │ .zig   │
+│        │ │parseKey  │ │           │ │renderLine│ │        │ │        │
+│History │ │ Event()  │ │handleKey()│ │calcVisual│ │enterRaw│ │Config  │
+│ Store  │ │escape seq│ │Emacs/Vi   │ │ Lines()  │ │getTerm │ │load/   │
+│load/   │ │ handling │ │modes      │ │cursor    │ │ Width  │ │ save   │
+│ save   │ │          │ │           │ │ calc     │ │isStdin │ │XDG/    │
+│search  │ │          │ │           │ │          │ │ Tty    │ │AppData │
+└────────┘ └──────────┘ └───────────┘ └──────────┘ └────────┘ └────────┘
                               │
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
@@ -103,6 +103,18 @@ Manages persistent command history:
 - File-based persistence (XDG paths on Unix, AppData on Windows)
 - Forward and backward search
 - Configurable maximum entries
+
+### config.zig - Configuration Management
+
+Application-level persistent configuration:
+
+- **`Config`**: Settings struct with keymap, format, history, colors, timing, verbose, max_history
+- **`loadDefault()`**: Returns defaults with color detection via `platform.shouldUseColor()`
+- **`loadFromFile()`**: Parses a `key=value` config file (supports `repl.` prefixed keys)
+- **`saveToFile()`**: Serializes settings to a config file with `0o600` permissions
+- **`getDefaultConfigPath()`**: Resolves platform-specific paths (XDG on Linux, `~/Library/Preferences` on macOS, `%APPDATA%` on Windows)
+
+Config is a consumer-facing API — applications load it and map fields to `Repl.Options` before calling `Repl.run()`.
 
 ### keymap_emacs.zig / keymap_vi.zig - Keybindings
 

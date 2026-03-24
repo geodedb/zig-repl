@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-24 (Phase 10 close-out -- GAP-0038 through GAP-0046 resolved, all 46 gaps closed)
+**Last updated:** 2026-03-24 (Phase 11 -- GAP-0047 resolved, all 47 gaps closed)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -58,6 +58,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0044 | README Features list missing undo | 2026-03-24 | [#101](https://gitlab.com/devnw/zig/repl/-/issues/101) (closed) |
 | GAP-0045 | Delete key triggers undo in Emacs mode | 2026-03-24 | [#102](https://gitlab.com/devnw/zig/repl/-/issues/102) (closed) |
 | GAP-0046 | Delete key dead in Vi insert mode | 2026-03-24 | [#103](https://gitlab.com/devnw/zig/repl/-/issues/103) (closed) |
+| GAP-0047 | config.zig missing from ARCHITECTURE.md | 2026-03-24 | -- (doc gap) |
 
 ---
 
@@ -434,8 +435,17 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Evidence:** `src/keymap_vi.zig` -- maps `SyntheticKey.delete` to `delete_char_forward`; dead `0x1f` binding removed; `tests/integration.zig` -- Vi Delete key tests. 257/257 tests pass.
 - **Resolved date:** 2026-03-24
 
+### GAP-0047: config.zig Missing from ARCHITECTURE.md [RESOLVED]
+
+- **Issue:** -- (doc gap, no platform issue needed)
+- **Category:** Docs
+- **Severity:** Low
+- **Resolution:** Added `config.zig` to the ARCHITECTURE.md module diagram (middle tier alongside history.zig and platform.zig) and added a Key Components subsection describing Config, loadDefault/loadFromFile/saveToFile, getDefaultConfigPath, and the consumer-facing API pattern.
+- **Evidence:** `docs/ARCHITECTURE.md` -- config.zig box in diagram, Key Components section with 6 bullet points. 257/257 tests pass.
+- **Resolved date:** 2026-03-24
+
 ---
 
 ## Won't Do / Deferred
 
-_No Won't-Do items in the main gap tracker. All 46 gaps have been resolved._
+_No Won't-Do items in the main gap tracker. All 47 gaps have been resolved._
