@@ -1,40 +1,38 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-24 (Phase 17 -- QF-058 through QF-063 resolved; QF-050 accepted)
-**Audit phase**: Phase 17 -- gap closure
-**Total findings**: 63 (3 deferred, 2 won't-do, 57 resolved, 1 accepted, 0 open)
+**Last updated**: 2026-03-24 (Phase 19 -- QF-026 partial, QF-018/QF-019 won't-do)
+**Audit phase**: Phase 19 -- deferred closure
+**Total findings**: 64 (0 deferred, 4 won't-do, 58 resolved, 1 accepted, 0 open, 1 partial)
 
 ---
 
 ## Summary
 
-### Severity Distribution (Open/Deferred Only)
+### Severity Distribution (Open/Partial/Accepted Only)
 
 | Severity | Count | PriorityScore Range |
 |----------|-------|---------------------|
 | Critical | 0     | --                  |
-| High     | 1     | 85 (deferred)       |
-| Medium   | 2     | 40 (accepted), 45 (deferred) |
-| Low      | 1     | 25 (deferred)       |
+| High     | 1     | 85 (partial)        |
+| Medium   | 1     | 40 (accepted)       |
+| Low      | 0     | --                  |
 
 ### Severity Distribution (All, Including Resolved)
 
-| Severity | Count (Total) | Open | Deferred | Won't Do | Accepted | Resolved |
-|----------|---------------|------|----------|----------|----------|----------|
-| Critical | 6             | 0    | 0        | 0        | 0        | 6        |
-| High     | 11            | 0    | 1        | 0        | 0        | 10       |
-| Medium   | 25            | 0    | 1        | 1        | 1        | 22       |
-| Low      | 21            | 0    | 1        | 0        | 0        | 20       |
+| Severity | Count (Total) | Open | Partial | Won't Do | Accepted | Resolved |
+|----------|---------------|------|---------|----------|----------|----------|
+| Critical | 6             | 0    | 0       | 0        | 0        | 6        |
+| High     | 11            | 0    | 1       | 0        | 0        | 10       |
+| Medium   | 25            | 0    | 0       | 2        | 1        | 22       |
+| Low      | 22            | 0    | 0       | 1        | 0        | 21       |
 
-### Top Open/Deferred Risks
+### Top Open/Partial/Accepted Risks
 
-1. **Zero test coverage for core REPL loop (partial)** (QF-026, Score 85) -- `processInput` and `processAction` still need dedicated mock-based test harness. Deferred; requires mock stdin/stdout infrastructure.
-2. **Config.saveToFile/loadFromFile never called** (QF-018, Score 45) -- Documented as consumer-facing API. Not dead code per se. Deferred.
-3. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
-4. **Format enum never used at runtime** (QF-019, Score 25) -- Documented as consumer API. Deferred.
+1. **Core REPL loop test coverage (partial)** (QF-026, Score 85) -- `processAction` now has 27 dedicated unit tests covering all non-I/O KeyAction variants. `processInput` still needs mock stdin/stdout infrastructure (issue #52).
+2. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
 
-Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accepted QF-050. 2 GitLab issues closed (#110, #111). Issue #90 closed.
+Phase 19 added 27 processAction unit tests (QF-026 Deferred→Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
 
 ---
 
@@ -44,10 +42,8 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Evidence | Issue | Fix Summary | Owner | Effort | Status |
 |------|-------|----------|-------|----------|---------|-----------|----------|-------|-------------|-------|--------|--------|
-| 1 | QF-026 | High | 85 | Testing | Core loop test coverage partial | core.zig | `processInput`, `processAction`: 0 direct tests; ancillary tests exist | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Create test harness with mock stdin/stdout; test each KeyAction path | Maintainers | L | Deferred |
-| 2 | QF-018 | Medium | 45 | DeadCode | Config.saveToFile/loadFromFile never called | config.zig | Lines 68-171: defined but no callers; documented as consumer API | -- | Documented as consumer API; see #39 | Maintainers | S | Deferred |
-| 3 | QF-050 | Medium | 40 | Readability | core.zig at ~878 non-test lines (growth justified by undo integration) | core.zig | `wc -l src/core.zig` = 1044; first test at L879; non-test boundary at ~L878 | [#90](https://gitlab.com/devnw/zig/repl/-/issues/90) (closed) | Growth justified by undo integration; documented in ARCHITECTURE.md size note | Maintainers | -- | Accepted |
-| 4 | QF-019 | Low | 25 | DeadCode | Format enum never used at runtime | core.zig, config.zig | `Format` enum documented as consumer API; core.zig re-exports from config.zig | -- | Documented as consumer API | Maintainers | S | Deferred |
+| 1 | QF-026 | High | 85 | Testing | Core loop test coverage partial | core.zig | `processAction`: 27 dedicated tests covering all non-I/O KeyAction variants; `processInput`: 0 direct tests (needs mock stdin/stdout) | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Phase 1 done: 27 processAction tests added. Phase 2 remains: mock harness for processInput | Maintainers | L | Partial |
+| 2 | QF-050 | Medium | 40 | Readability | core.zig at ~878 non-test lines (growth justified by undo integration) | core.zig | `wc -l src/core.zig` = 1044; first test at L879; non-test boundary at ~L878 | [#90](https://gitlab.com/devnw/zig/repl/-/issues/90) (closed) | Growth justified by undo integration; documented in ARCHITECTURE.md size note | Maintainers | -- | Accepted |
 | 3 | QF-053 | High | 60 | ErrorHandling | flushPasteBuffer `catch {}` on insertSlice silently loses paste + cursor invariant violated | core.zig | L470: `insertSlice(...) catch {}`; L471: `cursor += sanitized.len` runs regardless of insert success | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Changed `catch {}` to `catch return` so cursor advancement is guarded on insertSlice success | Maintainers | S | Resolved |
 | 4 | QF-052 | Medium | 48 | Correctness | handleSearch reads 256 bytes but processes only search_buf[0], discarding bytes 1..n | core.zig | L802-808: `const n = try stdin.read(&search_buf)` then `const c = search_buf[0]`; bytes 1..n lost | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Wrapped character processing in `for (search_buf[0..n])` loop; all bytes now processed | Maintainers | S | Resolved |
 | 7 | QF-051 | Medium | 36 | Readability | processAction 231 lines; .complete (47 LOC, depth 6) and .reverse_tab (27 LOC, depth 6) | core.zig | L563-793: `awk '/^fn processAction/,/^}/' | wc -l` = 231; .complete L721-766; .reverse_tab L583-608 | [#91](https://gitlab.com/devnw/zig/repl/-/issues/91) | Extracted handleCompletion() and handleUnindent(); processAction now 159 lines (target was <180) | Maintainers | S | Resolved |
@@ -67,12 +63,15 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | QF-ID | Severity | Score | Category | Finding | Reason |
 |-------|----------|-------|----------|---------|--------|
 | QF-034 | Medium | 65 | Duplication | Vi insert Ctrl-key dispatch duplicated from Emacs | Won't Do -- Vi handler has state mutation (mode transitions, pending operators) that Emacs lacks. Coupling the two would add complexity without reducing risk. The duplication is intentional to allow independent evolution. |
+| QF-018 | Medium | 45 | DeadCode | Config.saveToFile/loadFromFile never called internally | Won't Do -- Intentional consumer-facing API; documented in config.zig module doc comments (lines 16-30) and Config vs Options design notes. Not dead code. |
+| QF-019 | Low | 25 | DeadCode | Format enum never used at runtime | Won't Do -- Intentional consumer-facing API; documented in config.zig doc comments (line 67-70). Format is part of the public Config struct, persisted/parsed by saveToFile/loadFromFile. |
 | QF-014 | Medium | 45 | ErrorHandling | Vi kill ring `catch {}` on alloc | Won't Do -- The `catch {}` is intentional and documented. If alloc fails, the delete operation still succeeds (text is removed); only the kill ring storage fails. Propagating the error would make delete unreliable. |
 
 ### Resolved Findings
 
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Issue | Resolution | Status |
 |------|-------|----------|-------|----------|---------|-----------|-------|------------|--------|
+| -- | QF-064 | Low | 8 | Cleanup | Unused `builtin` import in core.zig | core.zig | -- | Deleted unused `const builtin = @import("builtin")` at line 13 | Resolved |
 | -- | QF-058 | High | 60 | ErrorHandling | handleCompletion insertSlice catch {} advances cursor on OOM | core.zig | [#110](https://gitlab.com/devnw/zig/repl/-/issues/110) | Changed `catch {}` to `catch return` at core.zig:834 | Resolved |
 | -- | QF-059 | Medium | 48 | Correctness | delete_word (Alt+D) missing kill ring save | core.zig | [#111](https://gitlab.com/devnw/zig/repl/-/issues/111) | Added kill ring save to .delete_word handler | Resolved |
 | -- | QF-060 | Low | 24 | Consistency | Inconsistent try vs catch {} for kill_ring.appendSlice | core.zig | -- | Changed try to catch {} for consistency | Resolved |
@@ -125,7 +124,7 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
 | QF-032 | 90 | Critical | Signal handler infrastructure is dead code | Resolved |
-| QF-026 | 85 | High | Core loop test coverage partial -- processInput/processAction untested | Deferred |
+| QF-026 | 85 | High | Core loop test coverage -- processAction: 27 tests; processInput: needs mock harness | Partial |
 | QF-024 | 65 | Medium | No signal handlers for terminal cleanup (resolved via QF-032) | Resolved |
 
 ### Readability / Complexity (0 open findings)
@@ -157,7 +156,7 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
-| QF-026 | 85 | High | Core loop test coverage partial | Deferred |
+| QF-026 | 85 | High | Core loop test coverage -- processAction: 27 tests; processInput: needs mock harness | Partial |
 | QF-056 | 36 | Medium | Integration tests for undo: 10 tests added covering full type->undo->verify flows | Resolved |
 | QF-025 | 60 | Medium | Keymap tests are no-ops | Resolved |
 | QF-048 | 40 | Medium | CI cache added: global `cache:` block with `key: zig-${ZIG_VERSION}` | Resolved |
@@ -205,13 +204,15 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
 | QF-063 | 8 | Low | Unused import `history_mod` in search.zig -- deleted | Resolved |
+| QF-064 | 8 | Low | Unused `builtin` import in core.zig -- deleted | Resolved |
 
-### Dead Code (2 deferred findings)
+### Dead Code (2 won't-do findings)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
-| QF-018 | 45 | Medium | Config.saveToFile/loadFromFile -- documented as consumer API | Deferred |
+| QF-018 | 45 | Medium | Config.saveToFile/loadFromFile -- intentional consumer API | Won't Do |
 | QF-038 | 40 | Low | CompletionProvider and keywordProvider -- documented as consumer API | Resolved |
+| QF-019 | 25 | Low | Format enum -- intentional consumer API | Won't Do |
 | QF-039 | 35 | Low | parse.trimTrailing and hasBackslashContinuation -- documented as consumer API | Resolved |
 
 ### API Contract (0 open findings)
@@ -219,12 +220,6 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
 | QF-041 | 25 | Low | config.saveToFile allocator documented as reserved for future use | Resolved |
-
-### Dead Code / API Contract (1 deferred finding)
-
-| QF-ID | Score | Severity | Summary | Status |
-|-------|-------|----------|---------|--------|
-| QF-019 | 25 | Low | Format enum documented as consumer API | Deferred |
 
 ---
 
@@ -268,15 +263,15 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
-| QF-026 | 85 | Build test infrastructure for core loop; achieve 50%+ coverage | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Deferred -- requires mock harness |
+| QF-026 | 85 | Phase 1 done (27 processAction tests). Phase 2: mock harness for processInput | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Partial |
 | QF-015 | 80 | Real undo stack in src/undo.zig; integrated into core.zig (GAP-0018) | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Resolved |
 
-### Deferred (no action needed)
+### Won't Do (intentional consumer APIs)
 
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
-| QF-018 | 45 | Documented as consumer API | -- | Deferred |
-| QF-019 | 25 | Documented as consumer API | -- | Deferred |
+| QF-018 | 45 | Intentional consumer-facing API; documented in config.zig | -- | Won't Do |
+| QF-019 | 25 | Intentional consumer-facing API; documented in config.zig | -- | Won't Do |
 
 ---
 
@@ -288,7 +283,7 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | [#46](https://gitlab.com/devnw/zig/repl/-/issues/46) | Bug: README and doc comments wrong API | QF-020, QF-028, QF-029, QF-021, QF-022 (all Resolved) |
 | [#48](https://gitlab.com/devnw/zig/repl/-/issues/48) | Bug: TerminalWriter.print silently discards >4096 bytes | QF-010, QF-005 (both Resolved) |
 | [#50](https://gitlab.com/devnw/zig/repl/-/issues/50) | Bug: .undo replaces buffer with kill ring | QF-015 (Resolved), QF-030 (Resolved) |
-| [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Zero test coverage for core REPL loop | QF-026 (Deferred), QF-025 (Resolved) |
+| [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Zero test coverage for core REPL loop | QF-026 (Partial), QF-025 (Resolved) |
 | [#54](https://gitlab.com/devnw/zig/repl/-/issues/54) | Refactor: deduplicate findWordStart/End and enums | QF-007, QF-008, QF-009 (all Resolved) |
 | [#56](https://gitlab.com/devnw/zig/repl/-/issues/56) | Refactor: processInput complexity | QF-002, QF-003, QF-001 (Resolved), QF-004 (Resolved) |
 | [#80](https://gitlab.com/devnw/zig/repl/-/issues/80) | Testing: render.zig zero test blocks for 2 pure functions | QF-046 (Resolved) |
@@ -315,7 +310,7 @@ Phase 17 resolved all 6 findings from Phase 16 (QF-058 through QF-063) and accep
 | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) Implement full undo/redo stack | QF-015 (Resolved), QF-055 (Resolved), QF-056 (Resolved) |
 | [#19](https://gitlab.com/devnw/zig/repl/-/issues/19) Improve signal handling | QF-024 (Resolved), QF-032 (Resolved) |
 | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) Write API documentation | QF-020, QF-021, QF-022 (all Resolved) |
-| [#39](https://gitlab.com/devnw/zig/repl/-/issues/39) Config module disconnected | QF-023 (Resolved), QF-018 (Deferred) |
+| [#39](https://gitlab.com/devnw/zig/repl/-/issues/39) Config module disconnected | QF-023 (Resolved), QF-018 (Won't Do) |
 | [#56](https://gitlab.com/devnw/zig/repl/-/issues/56) Refactor: processInput complexity | QF-002, QF-003, QF-001 (Resolved), QF-050 (Accepted), QF-051 (Resolved) |
 | [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) CI stale comment / build stages | QF-048, QF-054 |
 

@@ -10,7 +10,6 @@
 //! - Prompt rendering
 
 const std = @import("std");
-const builtin = @import("builtin");
 const platform = @import("platform.zig");
 const history_mod = @import("history.zig");
 const completion = @import("completion.zig");
@@ -1044,4 +1043,497 @@ test "renderPrompt: buffer overflow produces valid partial output" {
 
     // Verify the content up to byte 15 is clean
     try std.testing.expectEqualStrings("\x1b[1A\r\x1b[J> ABCDE\r", written);
+}
+
+// ============================================================================
+// Tests for processAction -- covers all non-I/O KeyAction variants (QF-026)
+// ============================================================================
+
+test "processAction: none and insert are no-ops" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello");
+    state.cursor = 3;
+
+    try processAction(&state, .none);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+
+    try processAction(&state, .insert);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+}
+
+test "processAction: insert_tab inserts tab at cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "ab");
+    state.cursor = 1;
+
+    try processAction(&state, .insert_tab);
+    try std.testing.expectEqualStrings("a\tb", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "processAction: reverse_tab removes leading tab" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "\thello");
+    state.cursor = 3;
+
+    try processAction(&state, .reverse_tab);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "processAction: reverse_tab removes leading spaces (up to 4)" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "    hello");
+    state.cursor = 6;
+
+    try processAction(&state, .reverse_tab);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "processAction: backspace deletes char before cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 2;
+
+    try processAction(&state, .backspace);
+    try std.testing.expectEqualStrings("ac", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.cursor);
+}
+
+test "processAction: backspace at position 0 is no-op" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 0;
+
+    try processAction(&state, .backspace);
+    try std.testing.expectEqualStrings("abc", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+}
+
+test "processAction: delete_char removes char at cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 1;
+
+    try processAction(&state, .delete_char);
+    try std.testing.expectEqualStrings("ac", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.cursor);
+}
+
+test "processAction: delete_char at end is no-op" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 3;
+
+    try processAction(&state, .delete_char);
+    try std.testing.expectEqualStrings("abc", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+}
+
+test "processAction: delete_word deletes forward to word boundary and populates kill ring" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 0;
+
+    try processAction(&state, .delete_word);
+    // findWordEnd skips non-whitespace then whitespace, so "hello " is deleted
+    try std.testing.expectEqualStrings("world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+    try std.testing.expectEqualStrings("hello ", state.kill_ring.items);
+    // last_was_kill is reset after switch for non-delete_to_eol/bol actions
+    try std.testing.expect(!state.last_was_kill);
+}
+
+test "processAction: delete_word_backward deletes backward to word boundary" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 11; // end
+
+    try processAction(&state, .delete_word_backward);
+    try std.testing.expectEqualStrings("hello ", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 6), state.cursor);
+    try std.testing.expectEqualStrings("world", state.kill_ring.items);
+    // last_was_kill is reset after switch for non-delete_to_eol/bol actions
+    try std.testing.expect(!state.last_was_kill);
+}
+
+test "processAction: delete_to_eol deletes from cursor to end" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 5;
+
+    try processAction(&state, .delete_to_eol);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+    try std.testing.expectEqualStrings(" world", state.kill_ring.items);
+    try std.testing.expect(state.last_was_kill);
+}
+
+test "processAction: delete_to_bol deletes from start to cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 5;
+
+    try processAction(&state, .delete_to_bol);
+    try std.testing.expectEqualStrings(" world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+    try std.testing.expectEqualStrings("hello", state.kill_ring.items);
+    try std.testing.expect(state.last_was_kill);
+}
+
+test "processAction: move_left and move_right" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 2;
+
+    try processAction(&state, .move_left);
+    try std.testing.expectEqual(@as(usize, 1), state.cursor);
+
+    try processAction(&state, .move_right);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+
+    // Boundary: move_left at 0
+    state.cursor = 0;
+    try processAction(&state, .move_left);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+
+    // Boundary: move_right at end
+    state.cursor = 3;
+    try processAction(&state, .move_right);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+}
+
+test "processAction: move_word_left and move_word_right" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 8; // mid "world"
+
+    try processAction(&state, .move_word_left);
+    try std.testing.expectEqual(@as(usize, 6), state.cursor); // start of "world"
+
+    try processAction(&state, .move_word_right);
+    try std.testing.expectEqual(@as(usize, 11), state.cursor); // end of "world"
+}
+
+test "processAction: move_bol and move_eol" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello");
+    state.cursor = 3;
+
+    try processAction(&state, .move_bol);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+
+    try processAction(&state, .move_eol);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+}
+
+test "processAction: history_prev navigates backward" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("first");
+    try hist.append("second");
+
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    // First history_prev should show most recent entry
+    try processAction(&state, .history_prev);
+    try std.testing.expectEqualStrings("second", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 6), state.cursor);
+
+    // Second should show first entry
+    try processAction(&state, .history_prev);
+    try std.testing.expectEqualStrings("first", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+
+    // At beginning, should stay on first
+    try processAction(&state, .history_prev);
+    try std.testing.expectEqualStrings("first", state.buffer.items);
+}
+
+test "processAction: history_next navigates forward" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("first");
+    try hist.append("second");
+
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    // Navigate to first entry
+    try processAction(&state, .history_prev);
+    try processAction(&state, .history_prev);
+    try std.testing.expectEqualStrings("first", state.buffer.items);
+
+    // Navigate forward
+    try processAction(&state, .history_next);
+    try std.testing.expectEqualStrings("second", state.buffer.items);
+
+    // Navigate past end clears buffer
+    try processAction(&state, .history_next);
+    try std.testing.expectEqualStrings("", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.cursor);
+}
+
+test "processAction: history_first and history_last" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("first");
+    try hist.append("second");
+    try hist.append("third");
+
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try processAction(&state, .history_first);
+    try std.testing.expectEqualStrings("first", state.buffer.items);
+
+    try processAction(&state, .history_last);
+    try std.testing.expectEqualStrings("third", state.buffer.items);
+}
+
+test "processAction: yank inserts kill ring at cursor" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "ac");
+    state.cursor = 1;
+    try state.kill_ring.appendSlice(allocator, "b");
+
+    try processAction(&state, .yank);
+    try std.testing.expectEqualStrings("abc", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "processAction: undo restores previous state" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    // Push a snapshot
+    try state.undo_stack.push("hello", 3);
+
+    // Modify buffer
+    try state.buffer.appendSlice(allocator, "world");
+    state.cursor = 5;
+
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+}
+
+test "processAction: undo with empty stack is no-op" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello");
+    state.cursor = 5;
+
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+}
+
+test "processAction: run, cancel, quit are no-ops" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello");
+    state.cursor = 3;
+
+    try processAction(&state, .run);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+
+    try processAction(&state, .cancel);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+
+    try processAction(&state, .quit);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+}
+
+test "processAction: vi_normal_mode and vi_insert_mode are no-ops" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "test");
+    state.cursor = 2;
+
+    try processAction(&state, .vi_normal_mode);
+    try std.testing.expectEqualStrings("test", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+
+    try processAction(&state, .vi_insert_mode);
+    try std.testing.expectEqualStrings("test", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+}
+
+test "processAction: content_changed flag set for modifying actions" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello");
+    state.cursor = 5;
+
+    // Non-modifying action should not set content_changed
+    state.content_changed = false;
+    try processAction(&state, .move_left);
+    try std.testing.expect(!state.content_changed);
+
+    // Modifying action should set content_changed
+    state.content_changed = false;
+    try processAction(&state, .backspace);
+    try std.testing.expect(state.content_changed);
+}
+
+test "processAction: last_was_kill reset after non-kill action" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 5;
+
+    // delete_to_eol sets last_was_kill
+    try processAction(&state, .delete_to_eol);
+    try std.testing.expect(state.last_was_kill);
+
+    // Non-kill action resets it
+    try processAction(&state, .move_left);
+    try std.testing.expect(!state.last_was_kill);
+}
+
+test "processAction: complete with completion function" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    state.complete_fn = struct {
+        fn complete(prefix: []const u8, ctx: *completion.CompletionContext) void {
+            _ = prefix;
+            ctx.addCandidate("hello_world") catch return;
+        }
+    }.complete;
+
+    try state.buffer.appendSlice(allocator, "hel");
+    state.cursor = 3;
+
+    try processAction(&state, .complete);
+    try std.testing.expectEqualStrings("hello_world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 11), state.cursor);
+}
+
+test "processAction: complete without function is no-op" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "hel");
+    state.cursor = 3;
+
+    try processAction(&state, .complete);
+    try std.testing.expectEqualStrings("hel", state.buffer.items);
 }
