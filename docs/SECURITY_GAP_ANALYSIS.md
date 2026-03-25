@@ -1,22 +1,32 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-25 (Phase 14 new findings)
+**Date:** 2026-03-25 (Audit Cycle 2, Phase 4)
 **Auditor:** Security Reviewer (automated + manual code review)
 **Scope:** Full source tree at commit `f8eab0c` (branch: main)
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 12 (Phase 15 closure -- SF-030 resolved; 3 open [3 Low])
+**Revision:** 14 (Gap Closure -- SF-028 resolved; SF-026, SF-027 marked Won't Do; 0 open findings)
 
 ---
 
 ## Overall Assessment
 
-**No Critical or High severity findings. 3 open findings (3 Low). 30 total SF-IDs tracked.**
+**No Critical or High severity findings. 0 open findings. 30 total SF-IDs tracked.**
 
 The Zig REPL library maintains a sound security posture for a v0.1.0 release. The codebase
 is memory-safe by default (Zig's safety checks), has no external C dependencies, and
-uses minimal attack surface. Since the initial audit (2026-03-23), **21 of 30 findings
-have been resolved** (22 unique root causes; SF-002 reclassified as SF-014), with 3 marked Won't Do, 1 confirmed No Action Needed, and 3 open (3 Low).
+uses minimal attack surface. Since the initial audit (2026-03-23), **24 of 30 findings
+have been resolved** (23 unique root causes; SF-002 reclassified as SF-014), with 5 marked Won't Do, 1 confirmed No Action Needed, and 0 open.
+
+Audit Cycle 2, Phase 4 (2026-03-25) performed a comprehensive re-review of all 3 open Low
+findings and all 22 resolved findings. Gap Closure (2026-03-25) then resolved SF-028 and
+marked SF-026 and SF-027 as Won't Do with documented rationale:
+- **SF-026** (Low, risk 5): Undo buffer bypasses display sanitization -- **Won't Do**. Confirmed theoretical only; no real exploit path. Undo buffer is populated from already-sanitized edit buffer; render pipeline provides independent output sanitization.
+- **SF-027** (Low, risk 8): `saved_termios` not async-signal-safe -- **Won't Do**. Cosmetic-only impact confirmed. Mitigated by SA_RESETHAND one-shot handler. Documented as accepted risk.
+- **SF-028** (Low, risk 5): Direct ArrayList length mutation -- **Resolved**. Replaced `state.buffer.items.len = state.cursor` with `state.buffer.shrinkRetainingCapacity(state.cursor)` in core.zig delete_to_eol handler.
+- All 22 previously resolved findings verified -- no regressions detected.
+- One Info-level observation about `\r` in search display noted but does NOT warrant a new SF-ID (cosmetic only, ESC already blocked by input filter).
+- **No new findings identified. 0 open findings remain.**
 
 Phase 9 audit (2026-03-24) performed a Phase 3 deep review. NC-001 and NC-002 (existing
 Low findings from Phase 2) were re-confirmed at Low severity with no changes. Two new
@@ -38,9 +48,9 @@ and confirmed secure.
 Phase 13 new findings (2026-03-24) identified 5 new validated findings (SF-024 through SF-028):
 - **SF-024**: History `clear()` missing chmod on pre-existing file (`src/history.zig:214`) -- **Open** (Low, risk 8)
 - **SF-025**: Signal handler uses `std.os.linux.*` on all POSIX platforms (`src/platform.zig:40,45,55`) -- **Open** (Medium, risk 35). Blocks macOS/FreeBSD support. GitLab issue created.
-- **SF-026**: Undo buffer `appendSlice` bypasses display sanitization (`src/core.zig:741`) -- **Open** (Low/Info, risk 5). Theoretical only; no action required.
-- **SF-027**: `saved_termios` global not async-signal-safe (`src/platform.zig:25,39,210,237`) -- **Open** (Low, risk 8). Mitigated by SA_RESETHAND one-shot and narrow race window.
-- **SF-028**: `delete_to_eol` directly mutates ArrayList length field (`src/core.zig:654`) -- **Open** (Low/Info, risk 5). Informational; optional cleanup.
+- **SF-026**: Undo buffer `appendSlice` bypasses display sanitization (`src/core.zig:741`) -- **Won't Do** (Low/Info, risk 5). Theoretical only; no action required.
+- **SF-027**: `saved_termios` global not async-signal-safe (`src/platform.zig:25,39,210,237`) -- **Won't Do** (Low, risk 8). Mitigated by SA_RESETHAND one-shot and narrow race window. Documented as accepted risk.
+- **SF-028**: `delete_to_eol` directly mutates ArrayList length field (`src/core.zig:654`) -- **Resolved**. Replaced `items.len = cursor` with `shrinkRetainingCapacity(cursor)`.
 
 Phase 14 new findings (2026-03-25) identified 2 new validated findings (SF-029 and SF-030):
 - **SF-029**: Search display writes buffer content without CRLF conversion or control-char replacement (`src/search.zig:67-71`) -- **Resolved**. Added `replaceNewlinesForDisplay()` helper to replace `\n` with space in display buffer.
@@ -62,27 +72,26 @@ findings from Phase 5.
 - Structured error handling throughout
 
 **Remaining areas:**
-- Signal handler async-signal-safety of `saved_termios` (SF-027 -- Low, open, mitigated)
-- Undo buffer sanitization theoretical gap (SF-026 -- Low, informational, no action required)
-- `delete_to_eol` direct ArrayList mutation (SF-028 -- Low, informational, optional cleanup)
+- Signal handler async-signal-safety of `saved_termios` (SF-027 -- Won't Do, mitigated by SA_RESETHAND)
+- Undo buffer sanitization theoretical gap (SF-026 -- Won't Do, no real exploit path)
 - Supply chain pinning for CI/CD dependencies (SF-012 -- Won't Do, external tooling)
 
 ---
 
 ## Audit Progression
 
-| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Phase 14 (2026-03-25) | Phase 15 (2026-03-25) | Delta (Phase 14 to 15) |
-|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|----------------------|----------------------|------------------------|
-| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 23 | 28 | 30 | 30 | 0 |
-| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 5 | 5 | 3 | -2 (SF-029, SF-030 resolved) |
-| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | 18 | 18 | 20 | 22 | +2 |
-| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
-| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
-| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | 4 | 3 | -1 (SF-030 resolved) |
-| Info severity (open) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | -1 (SF-029 resolved) |
-| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | 2 new findings (SF-029, SF-030) | SF-029, SF-030 resolved | +2 resolved |
+| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Phase 14 (2026-03-25) | Phase 15 (2026-03-25) | AC2-P4 (2026-03-25) | Delta (Phase 15 to AC2-P4) |
+|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|----------------------|----------------------|---------------------|----------------------------|
+| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 23 | 28 | 30 | 30 | 30 | 30 | 0 |
+| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 5 | 5 | 3 | 3 | 0 | -3 |
+| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | 18 | 18 | 20 | 22 | 22 | 24 | +2 |
+| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 5 | +2 |
+| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 |
+| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | 4 | 3 | 3 | 0 | -3 |
+| Info severity (open) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 |
+| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | 2 new findings (SF-029, SF-030) | SF-029, SF-030 resolved | All 3 open + 22 resolved re-verified; no new findings | SF-028 resolved; SF-026, SF-027 won't-do | -3 open |
 
 ---
 
@@ -93,25 +102,29 @@ findings from Phase 5.
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
 | High | 0 | 0 | 0 | 0 | 0 | 30 days |
 | Medium | 7 | 0 | 7 | 0 | 0 | 90 days |
-| Low | 22 | 3 | 15 | 3 | 1 | 180 days |
+| Low | 22 | 0 | 16 | 5 | 1 | 180 days |
 | Info | 1 | 0 | 1 | 0 | 0 | Backlog |
-| **Total** | **30** | **3** | **23** | **3** | **1** | |
+| **Total** | **30** | **0** | **24** | **5** | **1** | |
 
-Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-025 resolved in Phase 13 (Medium resolved count updated from 6 to 7). SF-026 and SF-028 are informational Low findings (risk 5). SF-029 resolved (Info-severity, cosmetic display fix). SF-030 resolved (Phase 15 -- parameter changed to pointer type).
+Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-025 resolved in Phase 13 (Medium resolved count updated from 6 to 7). SF-028 resolved (Gap Closure -- replaced items.len mutation with shrinkRetainingCapacity). SF-026 and SF-027 marked Won't Do (Gap Closure -- theoretical only / mitigated by SA_RESETHAND). SF-029 resolved (Info-severity, cosmetic display fix). SF-030 resolved (Phase 15 -- parameter changed to pointer type).
 
-### 3 open findings: 3 Low (SF-026, SF-027, SF-028). No Critical, High, Medium, or Info findings.
+### 0 open findings. No Critical, High, Medium, Low, or Info findings remain open.
 
 ---
 
 ## Stack-Ranked Findings Table
 
-### Open Findings (Phase 15)
+### Open Findings (Gap Closure)
 
-| Rank | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Evidence (file:line) | Confidence | SLA |
-|------|-------|----------|------------|---------|-----------|-------------|----------------------|------------|-----|
-| 1 | SF-027 | Low | 8 | `saved_termios` global not async-signal-safe | platform | CWE-364 | `src/platform.zig:25,39,210,237` | suspected | 180 days (2026-09-20) |
-| 2 | SF-026 | Low | 5 | Undo buffer `appendSlice` bypasses display sanitization | core | CWE-116 | `src/core.zig:741` | suspected | 180 days (2026-09-20) |
-| 3 | SF-028 | Low | 5 | `delete_to_eol` directly mutates ArrayList length field | core | CWE-119 | `src/core.zig:654` | suspected | 180 days (2026-09-20) |
+No open findings remain. All previously open items have been resolved or marked Won't Do.
+
+### Recently Closed (Gap Closure, 2026-03-25)
+
+| Rank | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Evidence (file:line) | Confidence | Disposition |
+|------|-------|----------|------------|---------|-----------|-------------|----------------------|------------|-------------|
+| -- | SF-028 | Low | 5 | `delete_to_eol` directly mutates ArrayList length field | core | CWE-119 | `src/core.zig:654` | suspected | **Resolved** -- replaced with `shrinkRetainingCapacity` |
+| -- | SF-027 | Low | 8 | `saved_termios` global not async-signal-safe | platform | CWE-364 | `src/platform.zig:25,39,210,237` | suspected | **Won't Do** -- cosmetic-only impact, mitigated by SA_RESETHAND |
+| -- | SF-026 | Low | 5 | Undo buffer `appendSlice` bypasses display sanitization | core | CWE-116 | `src/core.zig:741` | suspected | **Won't Do** -- theoretical only, no exploit path |
 
 ### Recently Resolved (Phase 4)
 
@@ -127,6 +140,8 @@ Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted onc
 | SF-012 | Low | 20 | Pre-commit/CI pinned by mutable tag, not SHA | Won't Do -- external tooling control. GitLab CI component references (`devnw/ci-catalog`) may not support SHA pinning for components. Pre-commit hook versions are managed by the pre-commit framework. Pinning these to SHAs would require forking external tooling. |
 | SF-008 | Low | 15 | File path completion allows full filesystem traversal | Won't Do -- by design for a general-purpose REPL library. Consumers must implement their own path restrictions if needed. This is documented in the completion module. |
 | SF-015 | Low | 10 | sanitizePasteContent theoretical fragmentation gap | Won't Do -- theoretical only. Terminal emulators deliver paste markers atomically. The 256-byte read buffer is much larger than the 6-byte marker. No real-world exploitation path exists. |
+| SF-027 | Low | 8 | `saved_termios` global not async-signal-safe | Won't Do -- cosmetic-only impact confirmed. SA_RESETHAND one-shot handler limits the race window to a single signal delivery during the narrow struct-copy instruction sequence. Worst case is a terminal `reset` command needed. Not a security vulnerability. Documented as accepted risk. |
+| SF-026 | Low | 5 | Undo buffer `appendSlice` bypasses display sanitization | Won't Do -- theoretical only. No real exploit path exists: the undo buffer is populated from the already-sanitized edit buffer, and the render pipeline provides independent output sanitization. No unfiltered characters can enter the undo buffer through any existing code path. |
 
 ### No Action Needed
 
@@ -340,7 +355,7 @@ These `std.posix.system.*` functions dispatch to the correct platform backend at
 
 ---
 
-### SF-026: Undo buffer appendSlice bypasses display sanitization [OPEN]
+### SF-026: Undo buffer appendSlice bypasses display sanitization [WON'T DO]
 
 | Field | Value |
 |-------|-------|
@@ -350,8 +365,9 @@ These `std.posix.system.*` functions dispatch to the correct platform backend at
 | **OWASP** | N/A |
 | **Confidence** | suspected |
 | **Exploit Surface** | Theoretical only |
-| **Status** | **Open** (informational, no action required) |
-| **SLA** | 180 days (2026-09-20) |
+| **Status** | **Won't Do** -- theoretical only, no exploit path. Undo buffer populated from already-sanitized edit buffer; render pipeline provides independent output sanitization. |
+| **SLA** | N/A (Won't Do) |
+| **Resolved date** | 2026-03-25 |
 
 **Summary:** The undo handler at `src/core.zig:741` uses `state.buffer.appendSlice()` to restore a previously saved buffer snapshot. This path does not go through `appendHistoryFiltered()` which strips control characters. However, this is purely theoretical because: (1) the undo buffer is populated from the edit buffer itself, which is already sanitized at input time; (2) the render path independently sanitizes all output. No unfiltered characters can enter the undo buffer through any existing code path.
 
@@ -375,7 +391,7 @@ state.buffer.appendSlice(state.allocator, entry.buffer) catch {
 
 ---
 
-### SF-027: saved_termios global not async-signal-safe [OPEN]
+### SF-027: saved_termios global not async-signal-safe [WON'T DO]
 
 | Field | Value |
 |-------|-------|
@@ -385,8 +401,9 @@ state.buffer.appendSlice(state.allocator, entry.buffer) catch {
 | **OWASP** | N/A |
 | **Confidence** | suspected |
 | **Exploit Surface** | Requires precise signal timing during raw mode enter/exit |
-| **Status** | **Open** (mitigated by SA_RESETHAND) |
-| **SLA** | 180 days (2026-09-20) |
+| **Status** | **Won't Do** -- cosmetic-only impact, mitigated by SA_RESETHAND one-shot handler. Documented as accepted risk. |
+| **SLA** | N/A (Won't Do) |
+| **Resolved date** | 2026-03-25 |
 
 **Summary:** The signal handler `handleTerminalSignal()` at `src/platform.zig:39` reads the global `saved_termios` variable which is written by the main thread at `src/platform.zig:210` (`enterRawMode`) and `src/platform.zig:237` (`restoreTerminalMode`). The `std.posix.termios` struct is not atomic; a signal arriving during a partial write of `saved_termios` by the main thread could cause the handler to read a torn (partially updated) struct, leading to incorrect terminal restoration.
 
@@ -421,7 +438,7 @@ saved_termios = null;
 
 ---
 
-### SF-028: delete_to_eol directly mutates ArrayList length field [OPEN]
+### SF-028: delete_to_eol directly mutates ArrayList length field [RESOLVED]
 
 | Field | Value |
 |-------|-------|
@@ -431,8 +448,9 @@ saved_termios = null;
 | **OWASP** | N/A |
 | **Confidence** | suspected |
 | **Exploit Surface** | Theoretical only |
-| **Status** | **Open** (informational, optional cleanup) |
-| **SLA** | 180 days (2026-09-20) |
+| **Status** | **Resolved** -- replaced `state.buffer.items.len = state.cursor` with `state.buffer.shrinkRetainingCapacity(state.cursor)` in `src/core.zig` delete_to_eol handler. |
+| **SLA** | N/A (Resolved) |
+| **Resolved date** | 2026-03-25 |
 
 **Summary:** The `delete_to_eol` action at `src/core.zig:654` truncates the edit buffer by directly setting `state.buffer.items.len = state.cursor`. This bypasses the ArrayList API (which would use `shrinkRetainingCapacity` or `replaceRange`). The truncated bytes remain in the backing allocation but are inaccessible through the ArrayList's public interface.
 
@@ -567,6 +585,61 @@ Alternatively, store the slice value directly (Zig slices are pointer+length, 16
 - A test demonstrates that the returned provider works correctly when `generate` is called after `keywordProvider` returns
 
 **Affected paths:** `src/completion.zig`
+
+---
+
+## Audit Cycle 2, Phase 4 (2026-03-25)
+
+Audit Cycle 2, Phase 4 performed a comprehensive security re-review of all open and
+resolved findings. The Phase 3 security-reviewer confirmed all 3 open Low findings and
+verified all 22 resolved findings with no regressions. No new findings warranting SF-IDs
+were identified.
+
+### Open Findings Re-confirmed
+
+| SF-ID | Severity | Risk Score | Status | Assessment |
+|-------|----------|------------|--------|------------|
+| SF-026 | Low | 5 | **Won't Do** | Undo buffer bypasses display sanitization -- confirmed theoretical only. No real exploit path exists: the undo buffer is populated from the already-sanitized edit buffer, and the render pipeline provides independent output sanitization. No action required. Marked Won't Do in Gap Closure (2026-03-25). |
+| SF-027 | Low | 8 | **Won't Do** | `saved_termios` not async-signal-safe -- confirmed cosmetic-only impact. SA_RESETHAND one-shot handler limits the race window to a single signal delivery during the narrow struct-copy instruction sequence. Worst case is a terminal `reset` command needed. Marked Won't Do in Gap Closure (2026-03-25). |
+| SF-028 | Low | 5 | **Resolved** | Replaced `state.buffer.items.len = state.cursor` with `state.buffer.shrinkRetainingCapacity(state.cursor)` in core.zig delete_to_eol handler. Resolved in Gap Closure (2026-03-25). |
+
+### Resolved Findings Regression Check
+
+All 22 resolved findings were verified against current source. No regressions detected.
+
+| SF-ID | Risk | Finding | Regression Status |
+|-------|------|---------|-------------------|
+| SF-030 | 12 | `keywordProvider` dangling pointer | No regression -- parameter accepts pointer type, no stack-local copy |
+| SF-029 | 3 | Search display garbled on multi-line history | No regression -- `replaceNewlinesForDisplay()` helper active in search.zig |
+| SF-025 | 35 | Signal handler uses `std.os.linux.*` | No regression -- `std.posix.system.*` calls in place |
+| SF-024 | 8 | History `clear()` missing chmod | No regression -- `chmod(0o600)` present after createFile in `clear()` |
+| SF-023 | 8 | Config file missing chmod | No regression -- `file.chmod(0o600)` in `src/config.zig` |
+| SF-022 | 8 | History file TOCTOU on permissions | No regression -- `chmod(0o600)` after file open in `src/history.zig` |
+| SF-021 | 8 | Static mutable `home_dir_buf` | No regression -- `threadlocal` declaration in `src/completion.zig` |
+| SF-014 | 50 | Signal handler dead code | No regression -- handlers wired at `platform.zig:193-194`, `platform.zig:219-220` |
+| SF-013 | 35 | Search bypasses history filtering | No regression -- `appendHistoryFiltered` at `core.zig:883` |
+| SF-009 | 35 | Terminal escape injection | No regression -- `appendHistoryFiltered()` guards all paths |
+| SF-005 | 40 | Bracketed paste forgery | No regression -- `sanitizePasteContent()` active |
+| SF-001 | 45 | History/config world-readable | No regression -- `.mode = 0o600` in all createFile calls |
+| SF-007 | 25 | Env var path injection | No regression -- `isPathSafe()` in `text_utils.zig` |
+| SF-003 | 20 | @intCast overflow (32-bit) | No regression -- 64MB bounds check present |
+| SF-016 | 20 | Paste buffer silent truncation | No regression -- flush-and-continue logic active |
+| SF-020 | 15 | CI hash same-origin | No regression -- SHA-256 hashes pinned in `.gitlab-ci.yml` |
+| SF-018 | 15 | renderPrompt buffer overflow | No regression -- `buffer_full` flag logic intact |
+| SF-010 | 15 | Silent output truncation | No regression -- partial write on overflow |
+| SF-017 | 10 | Search display unfiltered | No regression -- input filter documented |
+| SF-019 | 10 | Vi de/e underflow guard | No regression -- `end + 1 < items.len` form used |
+| SF-006 | 10 | catch unreachable on init | No regression -- safety comments present |
+| SF-011 | 10 | False fuzz claim | No regression -- SECURITY.md reflects planned status |
+
+### Info-Level Observation
+
+One Info-level observation was noted: the search display path at `src/search.zig` does not
+replace `\r` (carriage return) characters in buffer content before writing to the terminal.
+This does NOT warrant a new SF-ID because: (1) it is purely cosmetic -- the display cursor
+would return to column 0 but no security boundary is crossed; (2) ESC (0x1B) is already
+blocked by the input filter, preventing ANSI escape injection; (3) `\r` alone cannot inject
+terminal commands. This observation is documented here for completeness only.
 
 ---
 
@@ -994,13 +1067,10 @@ No new action required.
 ## Risk Distribution
 
 ```
-OPEN (4 findings):
-12  [===]         SF-030  keywordProvider dangling pointer          [RESOLVED]
-8   [==]          SF-027  saved_termios not async-signal-safe       [OPEN]
-5   [=]           SF-026  Undo buffer bypasses sanitization (theoretical) [OPEN]
-5   [=]           SF-028  delete_to_eol mutates ArrayList length    [OPEN]
+OPEN (0 findings):
+(none)
 
-RESOLVED (21 findings):
+RESOLVED (24 findings):
 50  [==========]  SF-014  Signal handler dead code                 [RESOLVED]
 45  [=========]   SF-001  History/config world-readable            [RESOLVED]
 40  [========]    SF-005  Bracketed paste forgery                  [RESOLVED]
@@ -1013,6 +1083,7 @@ RESOLVED (21 findings):
 15  [===]         SF-020  CI hash pinned in repo                   [RESOLVED]
 15  [===]         SF-018  renderPrompt buffer_full flag             [RESOLVED]
 15  [===]         SF-010  Silent output truncation                 [RESOLVED]
+12  [===]         SF-030  keywordProvider dangling pointer          [RESOLVED]
 10  [==]          SF-017  Search display input filter documented   [RESOLVED]
 10  [==]          SF-019  Vi de/e underflow guard restructured     [RESOLVED]
 10  [==]          SF-006  catch unreachable                        [RESOLVED]
@@ -1021,11 +1092,15 @@ RESOLVED (21 findings):
 8   [==]          SF-023  Config file missing chmod (same as SF-022) [RESOLVED]
 8   [==]          SF-021  Static mutable home_dir_buf (thread safety) [RESOLVED]
 8   [==]          SF-022  History file TOCTOU on permissions        [RESOLVED]
+5   [=]           SF-028  delete_to_eol shrinkRetainingCapacity      [RESOLVED]
+3   [=]           SF-029  Search display multi-line garble (cosmetic) [RESOLVED]
 
-WON'T DO (3 findings):
+WON'T DO (5 findings):
 20  [====]        SF-012  CI pinned by mutable tag                 [WON'T DO]
 15  [===]         SF-008  File path traversal (by design)          [WON'T DO]
 10  [==]          SF-015  Paste sanitization fragmentation         [WON'T DO]
+8   [==]          SF-027  saved_termios not async-signal-safe       [WON'T DO]
+5   [=]           SF-026  Undo buffer bypasses sanitization (theoretical) [WON'T DO]
 
 NO ACTION NEEDED (1 finding):
 15  [===]         SF-004  License mismatch in docs (root)          [NO ACTION]
@@ -1042,10 +1117,10 @@ NO ACTION NEEDED (1 finding):
 | CWE-474 | Use of Function with Inconsistent Implementations | 1 | SF-025 | Resolved |
 | CWE-404 | Improper Resource Shutdown or Release | 1 | SF-014 | Resolved |
 | CWE-362 | Race Condition (Shared Resource) | 1 | SF-021 | Resolved |
-| CWE-364 | Signal Handler Race Condition | 1 | SF-027 | **Open** |
+| CWE-364 | Signal Handler Race Condition | 1 | SF-027 | **Won't Do** |
 | CWE-367 | TOCTOU Race Condition | 1 | SF-022 | Resolved |
-| CWE-116 | Improper Encoding or Escaping | 5 | SF-009, SF-013, SF-017, SF-026, SF-029 | SF-009/013/017/029 Resolved, SF-026 **Open** (theoretical) |
-| CWE-119 | Improper Restriction of Operations within Bounds | 1 | SF-028 | **Open** (informational) |
+| CWE-116 | Improper Encoding or Escaping | 5 | SF-009, SF-013, SF-017, SF-026, SF-029 | SF-009/013/017/029 Resolved, SF-026 **Won't Do** (theoretical) |
+| CWE-119 | Improper Restriction of Operations within Bounds | 1 | SF-028 | **Resolved** (Gap Closure) |
 | CWE-130 | Length Parameter Inconsistency | 3 | SF-010, SF-016, SF-018 | All Resolved |
 | CWE-191 | Integer Underflow | 1 | SF-019 | Resolved |
 | CWE-494 | Download Without Integrity Check | 1 | SF-020 | Resolved |
@@ -1062,7 +1137,7 @@ NO ACTION NEEDED (1 finding):
 
 ## Findings by Area
 
-### Terminal / Platform (6 findings, 1 open)
+### Terminal / Platform (6 findings, 0 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
@@ -1071,9 +1146,9 @@ NO ACTION NEEDED (1 finding):
 | SF-018 | 15 | renderPrompt fixed buffer -- buffer_full flag stops writes on overflow | **Resolved** |
 | SF-010 | 15 | Silent output truncation >4096 bytes | Resolved |
 | SF-006 | 10 | catch unreachable on init | Resolved |
-| SF-027 | 8 | `saved_termios` global not async-signal-safe (mitigated by SA_RESETHAND) | **Open** |
+| SF-027 | 8 | `saved_termios` global not async-signal-safe (mitigated by SA_RESETHAND) | **Won't Do** |
 
-### Input Handling / Completion (11 findings, 2 open)
+### Input Handling / Completion (11 findings, 0 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
@@ -1085,8 +1160,8 @@ NO ACTION NEEDED (1 finding):
 | SF-017 | 10 | Search display -- input filter documented as intentional guard | **Resolved** |
 | SF-015 | 10 | Paste sanitization fragmentation gap (theoretical) | **Won't Do** |
 | SF-021 | 8 | Static mutable `home_dir_buf` without thread safety (Windows-only) | **Resolved** |
-| SF-026 | 5 | Undo buffer `appendSlice` bypasses display sanitization (theoretical) | **Open** (informational) |
-| SF-028 | 5 | `delete_to_eol` directly mutates ArrayList length field | **Open** (informational) |
+| SF-026 | 5 | Undo buffer `appendSlice` bypasses display sanitization (theoretical) | **Won't Do** |
+| SF-028 | 5 | `delete_to_eol` directly mutates ArrayList length field | **Resolved** |
 | SF-029 | 3 | Search display garbled on multi-line history entries (cosmetic) | **Resolved** |
 
 ### File System / Access Control (6 findings, 0 open)
@@ -1138,9 +1213,9 @@ NO ACTION NEEDED (1 finding):
 |-------|-----|--------|--------|
 | SF-030 | Changed `keywordProvider` parameter to pointer type, eliminating dangling pointer | 15 min | **Resolved** |
 | SF-029 | Added `replaceNewlinesForDisplay` helper + 6 unit tests in search.zig | 10 min | **Resolved** |
-| SF-028 | Replace `items.len = cursor` with `shrinkRetainingCapacity(cursor)` | 5 min | **Open** (optional) |
-| SF-026 | Add safety comment documenting undo path is pre-sanitized | 5 min | **Open** (optional) |
-| SF-027 | Document SA_RESETHAND mitigation as accepted risk, or add atomic flag | 30 min | **Open** |
+| SF-028 | Replace `items.len = cursor` with `shrinkRetainingCapacity(cursor)` | 5 min | **Resolved** |
+| SF-026 | Won't Do -- theoretical only, no exploit path; undo buffer populated from sanitized edit buffer | -- | **Won't Do** |
+| SF-027 | Won't Do -- documented SA_RESETHAND mitigation as accepted risk; cosmetic-only impact | -- | **Won't Do** |
 | SF-024 | Add `file.chmod(0o600)` after createFile in `clear()` (same pattern as `appendLine()`) | 5 min | Resolved |
 | SF-021 | Change `var home_dir_buf` to `threadlocal var home_dir_buf` | 5 min | Resolved |
 | SF-022 | Add `file.chmod(0o600)` after opening existing history files | 15 min | Resolved |
@@ -1185,21 +1260,15 @@ All automated security scanners returned zero findings across all phases (initia
 
 **No immediate rotation or emergency remediation required.** No leaked secrets, no active RCE, no authentication bypass.
 
-**Phase 15 action summary:**
-- **SF-030 (Low, risk 12):** Resolved. Parameter changed from by-value slice to pointer type, eliminating dangling pointer in `keywordProvider`. No GitLab issue per Low-findings policy.
-- **SF-029 (Info, risk 3):** Resolved. Added `replaceNewlinesForDisplay()` helper in search.zig to replace `\n` with space in display buffer. 6 unit tests added.
-- **SF-027 (Low, risk 8):** Document accepted risk or add atomic flag. 180-day SLA. Mitigated by SA_RESETHAND. No change from Phase 13.
-- **SF-026 (Low, risk 5):** Informational only. No action required. No change from Phase 13.
-- **SF-028 (Low, risk 5):** Informational only. Optional cleanup. No change from Phase 13.
-
-**Previously open findings now resolved:**
-- SF-030 (Low, risk 12): Resolved (Phase 15) -- parameter changed to pointer type, eliminating dangling pointer in `keywordProvider`.
-- SF-029 (Info, risk 3): Resolved (Phase 15) -- added `replaceNewlinesForDisplay()` helper in search.zig.
-- SF-025 (Medium, risk 35): Resolved -- signal handler updated to `std.posix.system.*`.
-- SF-024 (Low, risk 8): Resolved -- `chmod(0o600)` added after `createFile` in `clear()`.
+**Gap Closure action summary (2026-03-25):**
+- **SF-028 (Low, risk 5):** Resolved -- replaced `items.len = cursor` with `shrinkRetainingCapacity(cursor)` in core.zig delete_to_eol handler.
+- **SF-027 (Low, risk 8):** Won't Do -- documented SA_RESETHAND mitigation as accepted risk. Cosmetic-only impact confirmed.
+- **SF-026 (Low, risk 5):** Won't Do -- theoretical only, no exploit path. Undo buffer populated from sanitized edit buffer; render pipeline provides independent sanitization.
+- All 24 resolved findings verified with no regressions.
+- **0 open findings remain.**
 
 **No credentials, secrets, or actively exploitable remote vulnerabilities were found.**
 
 ---
 
-*Last updated: 2026-03-25 (Phase 15 closure -- SF-029, SF-030 resolved; 30 total SF-IDs; 3 open [3 Low]; 23 resolved; 3 won't do; 1 no action; no new GitLab issues)*
+*Last updated: 2026-03-25 (Gap Closure -- SF-028 resolved, SF-026 and SF-027 won't-do; 0 open findings; 30 total SF-IDs; 24 resolved; 5 won't do; 1 no action; no GitLab issues changed)*

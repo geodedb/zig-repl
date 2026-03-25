@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-25 (Phase 16 -- GAP-0059..GAP-0065 resolved, 64 of 65 gaps closed)
+**Last updated:** 2026-03-25 (Phase 20 / Gap Closure -- no GAP-XXXX changes; 64 of 65 gaps remain resolved; specialized gap analyses updated separately)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.

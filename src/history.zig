@@ -27,6 +27,10 @@ pub const HistoryStore = struct {
     deduplicate_global: bool = false,
     file_mutex: std.Thread.Mutex = .{},
     dir_ensured: bool = false,
+    /// PF-004: Persistent file handle kept open for the lifetime of the store
+    /// to avoid open/close overhead on every append. Lazily opened on first
+    /// append; closed in deinit() and reset in clear().
+    append_handle: ?std.fs.File = null,
 
     /// Initialize a new history store.
     ///
@@ -51,6 +55,12 @@ pub const HistoryStore = struct {
 
     /// Clean up history store resources.
     pub fn deinit(self: *HistoryStore) void {
+        // Close persistent append handle if open
+        if (self.append_handle) |handle| {
+            handle.close();
+            self.append_handle = null;
+        }
+
         for (self.entries.items) |entry| {
             self.allocator.free(entry);
         }
@@ -161,31 +171,36 @@ pub const HistoryStore = struct {
             self.allocator.free(old);
         }
 
-        // Persist to file
+        // Persist to file using the persistent append handle
         if (self.path) |path| {
             self.file_mutex.lock();
             defer self.file_mutex.unlock();
 
-            // Ensure directory exists (once per session)
-            if (!self.dir_ensured) {
-                if (std.fs.path.dirname(path)) |dir| {
-                    std.fs.cwd().makePath(dir) catch {};
+            // Lazily open the file handle on first append
+            if (self.append_handle == null) {
+                // Ensure directory exists (once per session)
+                if (!self.dir_ensured) {
+                    if (std.fs.path.dirname(path)) |dir| {
+                        std.fs.cwd().makePath(dir) catch {};
+                    }
+                    self.dir_ensured = true;
                 }
-                self.dir_ensured = true;
+
+                const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }) catch |err| {
+                    // If we can't save history, just continue without persisting
+                    if (err == error.FileNotFound) return;
+                    return err;
+                };
+
+                // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
+                if (comptime std.fs.has_executable_bit) {
+                    file.chmod(0o600) catch {};
+                }
+
+                self.append_handle = file;
             }
 
-            const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }) catch |err| {
-                // If we can't save history, just continue without persisting
-                if (err == error.FileNotFound) return;
-                return err;
-            };
-            defer file.close();
-
-            // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
-            if (comptime std.fs.has_executable_bit) {
-                file.chmod(0o600) catch {};
-            }
-
+            const file = self.append_handle.?;
             try file.seekFromEnd(0);
             try file.writeAll(line);
             try file.writeAll("\n");
@@ -199,6 +214,13 @@ pub const HistoryStore = struct {
             self.allocator.free(entry);
         }
         self.entries.clearRetainingCapacity();
+
+        // Close the persistent append handle before truncating the file;
+        // it will be lazily reopened on the next append.
+        if (self.append_handle) |handle| {
+            handle.close();
+            self.append_handle = null;
+        }
 
         // Clear file
         if (self.path) |path| {
@@ -571,6 +593,82 @@ test "history global deduplication handles multiple duplicates" {
     try std.testing.expectEqualStrings("y", hist.entries.items[0]);
     try std.testing.expectEqualStrings("z", hist.entries.items[1]);
     try std.testing.expectEqualStrings("x", hist.entries.items[2]);
+}
+
+test "history persistent handle: multiple appends persist correctly" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_persistent_handle.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Append several entries using the persistent handle
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+
+        try hist.append("line1");
+        try hist.append("line2");
+        try hist.append("line3");
+
+        // The handle should be open after the first append
+        try std.testing.expect(hist.append_handle != null);
+    }
+
+    // Verify all entries persisted correctly by loading from disk
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.load();
+
+        try std.testing.expectEqual(@as(usize, 3), hist.entries.items.len);
+        try std.testing.expectEqualStrings("line1", hist.entries.items[0]);
+        try std.testing.expectEqualStrings("line2", hist.entries.items[1]);
+        try std.testing.expectEqualStrings("line3", hist.entries.items[2]);
+    }
+}
+
+test "history persistent handle: clear then append persists correctly" {
+    const allocator = std.testing.allocator;
+
+    const path = "/tmp/test_repl_history_persistent_clear.tmp";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+
+        try hist.append("before_clear");
+        try std.testing.expect(hist.append_handle != null);
+
+        // Clear closes the handle and truncates the file
+        try hist.clear();
+        try std.testing.expect(hist.append_handle == null);
+
+        // Append after clear should reopen the handle
+        try hist.append("after_clear");
+        try std.testing.expect(hist.append_handle != null);
+    }
+
+    // Verify only the post-clear entry persisted
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.load();
+
+        try std.testing.expectEqual(@as(usize, 1), hist.entries.items.len);
+        try std.testing.expectEqualStrings("after_clear", hist.entries.items[0]);
+    }
+}
+
+test "history persistent handle: no handle opened without path" {
+    const allocator = std.testing.allocator;
+
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+
+    try hist.append("memory_only");
+    try std.testing.expect(hist.append_handle == null);
+    try std.testing.expectEqual(@as(usize, 1), hist.entries.items.len);
 }
 
 // isPathSafe tests are in text_utils.zig (canonical location)

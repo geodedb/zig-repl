@@ -37,79 +37,98 @@ pub const SyntheticKey = struct {
 pub fn parseKeyEvent(data: []const u8) !KeyEvent {
     if (data.len == 0) return error.NoInput;
 
-    if (data[0] == 0x1b) {
-        if (data.len > 1) {
-            if (data[1] == '[') {
-                if (data.len > 2) {
-                    // Extended sequences: ESC [ n ~
-                    if (data.len > 3 and data[3] == '~') {
-                        return switch (data[2]) {
-                            '2' => KeyEvent{ .key = SyntheticKey.insert },
-                            '3' => KeyEvent{ .key = SyntheticKey.delete },
-                            '5' => KeyEvent{ .key = SyntheticKey.page_up },
-                            '6' => KeyEvent{ .key = SyntheticKey.page_down },
-                            else => KeyEvent{ .key = data[2] },
-                        };
-                    }
-
-                    // Modifier sequences: ESC [ 1 ; n X
-                    if (data.len > 5 and data[2] == '1' and data[3] == ';') {
-                        const modifier = data[4];
-                        const key_char = data[5];
-
-                        const is_ctrl = (modifier == '5' or modifier == '7');
-                        const is_alt = (modifier == '3' or modifier == '7');
-
-                        return switch (key_char) {
-                            'A' => KeyEvent{ .key = 'p', .ctrl = true, .alt = is_alt },
-                            'B' => KeyEvent{ .key = 'n', .ctrl = true, .alt = is_alt },
-                            'C' => if (is_ctrl) KeyEvent{ .key = 'f', .alt = true } else KeyEvent{ .key = 'f', .ctrl = true },
-                            'D' => if (is_ctrl) KeyEvent{ .key = 'b', .alt = true } else KeyEvent{ .key = 'b', .ctrl = true },
-                            'H' => KeyEvent{ .key = 'a', .ctrl = true, .alt = is_ctrl },
-                            'F' => KeyEvent{ .key = 'e', .ctrl = true, .alt = is_ctrl },
-                            else => KeyEvent{ .key = key_char },
-                        };
-                    }
-
-                    // Standard arrow keys
-                    return switch (data[2]) {
-                        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
-                        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
-                        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
-                        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
-                        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
-                        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
-                        'Z' => KeyEvent{ .key = 'i', .ctrl = true, .alt = true }, // Shift+Tab
-                        else => KeyEvent{ .key = data[2] },
-                    };
-                }
-            } else if (data[1] == 'O') {
-                if (data.len > 2) {
-                    return switch (data[2]) {
-                        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
-                        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
-                        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
-                        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
-                        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
-                        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
-                        else => KeyEvent{ .key = data[2] },
-                    };
-                }
-            } else if ((data[1] & 0x7f) >= 'a' and (data[1] & 0x7f) <= 'z') {
-                return KeyEvent{ .key = @intCast(data[1] & 0x7f), .alt = true };
-            } else if (data[1] >= 'A' and data[1] <= 'Z') {
-                return KeyEvent{ .key = @intCast(data[1] - 'A' + 'a'), .alt = true };
-            }
-        }
-        return KeyEvent{ .key = 0x1b };
-    }
+    // Escape sequences
+    if (data[0] == 0x1b) return parseEscSequence(data);
 
     // Control characters
-    if (data[0] < 0x20) {
-        return KeyEvent{ .key = @intCast(data[0] + 'a' - 1), .ctrl = true };
-    }
+    if (data[0] < 0x20) return KeyEvent{ .key = @intCast(data[0] + 'a' - 1), .ctrl = true };
 
     return KeyEvent{ .key = data[0] };
+}
+
+/// Parse an escape-initiated sequence (ESC ...) into a KeyEvent.
+/// Handles CSI (ESC[), SS3 (ESC O), Alt-letter, and bare ESC.
+fn parseEscSequence(data: []const u8) KeyEvent {
+    if (data.len < 2) return KeyEvent{ .key = 0x1b };
+
+    if (data[1] == '[') return parseCsiSequence(data);
+    if (data[1] == 'O') return parseSs3Sequence(data);
+
+    // Alt + lowercase letter (or high-bit-set byte masked to lowercase)
+    if ((data[1] & 0x7f) >= 'a' and (data[1] & 0x7f) <= 'z') {
+        return KeyEvent{ .key = @intCast(data[1] & 0x7f), .alt = true };
+    }
+
+    // Alt + uppercase letter (normalized to lowercase)
+    if (data[1] >= 'A' and data[1] <= 'Z') {
+        return KeyEvent{ .key = @intCast(data[1] - 'A' + 'a'), .alt = true };
+    }
+
+    return KeyEvent{ .key = 0x1b };
+}
+
+/// Parse a CSI sequence: ESC [ ...
+fn parseCsiSequence(data: []const u8) KeyEvent {
+    if (data.len < 3) return KeyEvent{ .key = 0x1b };
+
+    // Extended sequences: ESC [ n ~
+    if (data.len > 3 and data[3] == '~') {
+        return switch (data[2]) {
+            '2' => KeyEvent{ .key = SyntheticKey.insert },
+            '3' => KeyEvent{ .key = SyntheticKey.delete },
+            '5' => KeyEvent{ .key = SyntheticKey.page_up },
+            '6' => KeyEvent{ .key = SyntheticKey.page_down },
+            else => KeyEvent{ .key = data[2] },
+        };
+    }
+
+    // Modifier sequences: ESC [ 1 ; n X
+    if (data.len > 5 and data[2] == '1' and data[3] == ';') {
+        return parseModifierSequence(data[4], data[5]);
+    }
+
+    // Standard arrow keys and others: ESC [ X
+    return switch (data[2]) {
+        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
+        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
+        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
+        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
+        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
+        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
+        'Z' => KeyEvent{ .key = 'i', .ctrl = true, .alt = true }, // Shift+Tab
+        else => KeyEvent{ .key = data[2] },
+    };
+}
+
+/// Parse an SS3 sequence: ESC O X
+fn parseSs3Sequence(data: []const u8) KeyEvent {
+    if (data.len < 3) return KeyEvent{ .key = 0x1b };
+
+    return switch (data[2]) {
+        'H' => KeyEvent{ .key = 'a', .ctrl = true }, // Home
+        'F' => KeyEvent{ .key = 'e', .ctrl = true }, // End
+        'A' => KeyEvent{ .key = 'p', .ctrl = true }, // Up
+        'B' => KeyEvent{ .key = 'n', .ctrl = true }, // Down
+        'C' => KeyEvent{ .key = 'f', .ctrl = true }, // Right
+        'D' => KeyEvent{ .key = 'b', .ctrl = true }, // Left
+        else => KeyEvent{ .key = data[2] },
+    };
+}
+
+/// Parse a modifier sequence payload: ESC [ 1 ; <modifier> <key_char>
+fn parseModifierSequence(modifier: u8, key_char: u8) KeyEvent {
+    const is_ctrl = (modifier == '5' or modifier == '7');
+    const is_alt = (modifier == '3' or modifier == '7');
+
+    return switch (key_char) {
+        'A' => KeyEvent{ .key = 'p', .ctrl = true, .alt = is_alt },
+        'B' => KeyEvent{ .key = 'n', .ctrl = true, .alt = is_alt },
+        'C' => if (is_ctrl) KeyEvent{ .key = 'f', .alt = true } else KeyEvent{ .key = 'f', .ctrl = true },
+        'D' => if (is_ctrl) KeyEvent{ .key = 'b', .alt = true } else KeyEvent{ .key = 'b', .ctrl = true },
+        'H' => KeyEvent{ .key = 'a', .ctrl = true, .alt = is_ctrl },
+        'F' => KeyEvent{ .key = 'e', .ctrl = true, .alt = is_ctrl },
+        else => KeyEvent{ .key = key_char },
+    };
 }
 
 /// Get the number of bytes consumed by the key event starting at data[0].

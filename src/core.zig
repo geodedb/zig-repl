@@ -654,7 +654,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         .delete_to_eol => {
             state.kill_ring.clearRetainingCapacity();
             state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..]) catch {};
-            state.buffer.items.len = state.cursor;
+            state.buffer.shrinkRetainingCapacity(state.cursor);
             state.last_was_kill = true;
         },
         .delete_to_bol => {
@@ -760,7 +760,9 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         .vi_normal_mode, .vi_insert_mode => {},
     }
 
-    if (action != .delete_to_eol and action != .delete_to_bol) {
+    if (action != .delete_to_eol and action != .delete_to_bol and
+        action != .delete_word and action != .delete_word_backward)
+    {
         state.last_was_kill = false;
     }
 }
@@ -1210,8 +1212,8 @@ test "processAction: delete_word deletes forward to word boundary and populates 
     try std.testing.expectEqualStrings("world", state.buffer.items);
     try std.testing.expectEqual(@as(usize, 0), state.cursor);
     try std.testing.expectEqualStrings("hello ", state.kill_ring.items);
-    // last_was_kill is reset after switch for non-delete_to_eol/bol actions
-    try std.testing.expect(!state.last_was_kill);
+    // delete_word is a kill action -- last_was_kill survives for Emacs kill-ring accumulation
+    try std.testing.expect(state.last_was_kill);
 }
 
 test "processAction: delete_word_backward deletes backward to word boundary" {
@@ -1228,8 +1230,8 @@ test "processAction: delete_word_backward deletes backward to word boundary" {
     try std.testing.expectEqualStrings("hello ", state.buffer.items);
     try std.testing.expectEqual(@as(usize, 6), state.cursor);
     try std.testing.expectEqualStrings("world", state.kill_ring.items);
-    // last_was_kill is reset after switch for non-delete_to_eol/bol actions
-    try std.testing.expect(!state.last_was_kill);
+    // delete_word_backward is a kill action -- last_was_kill survives for Emacs kill-ring accumulation
+    try std.testing.expect(state.last_was_kill);
 }
 
 test "processAction: delete_to_eol deletes from cursor to end" {

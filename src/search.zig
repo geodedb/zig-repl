@@ -11,6 +11,7 @@ const std = @import("std");
 const platform = @import("platform.zig");
 const text_utils = @import("text_utils.zig");
 const core = @import("core.zig");
+const input_mod = @import("input.zig");
 
 const appendHistoryFiltered = text_utils.appendHistoryFiltered;
 
@@ -30,11 +31,21 @@ pub fn handleSearch(state: *core.ReplState) !void {
         const n = try stdin.read(&search_buf);
         if (n == 0) continue;
 
-        for (search_buf[0..n]) |c| {
+        // QF-082: Use index-based loop with getKeyEventLength to handle
+        // multi-byte escape sequences (e.g. ESC[A for Up arrow) as single
+        // events instead of processing them byte-by-byte.
+        var i: usize = 0;
+        while (i < n) {
+            const c = search_buf[i];
+
             // QF-087: Split ESC from Enter/newline to handle history_index correctly.
             // ESC cancels the search and resets history position so subsequent
             // Up/Down navigation starts from the end of history.
             if (c == 0x1b) {
+                // Skip the entire escape sequence so trailing bytes
+                // (e.g. '[', 'A') are not processed as printable input.
+                const seq_len = input_mod.getKeyEventLength(search_buf[i..n]);
+                i += seq_len;
                 state.searching = false;
                 state.history_index = null;
                 break :outer;
@@ -62,6 +73,8 @@ pub fn handleSearch(state: *core.ReplState) !void {
             } else if (c >= 0x20 and c < 0x7f) {
                 try state.search_buffer.append(state.allocator, c);
             }
+
+            i += 1;
         }
 
         // Find in history (after processing all bytes in this read batch)
@@ -145,4 +158,71 @@ test "replaceNewlinesForDisplay preserves carriage returns" {
     var buf = "\r(search)`q': line1\nline2".*;
     const result = replaceNewlinesForDisplay(&buf);
     try std.testing.expectEqualStrings("\r(search)`q': line1 line2", result);
+}
+
+test "replaceNewlinesForDisplay preserves tabs" {
+    // Tabs should pass through unchanged
+    var buf = "col1\tcol2\ncol3".*;
+    const result = replaceNewlinesForDisplay(&buf);
+    try std.testing.expectEqualStrings("col1\tcol2 col3", result);
+}
+
+test "replaceNewlinesForDisplay handles consecutive newlines" {
+    var buf = "a\n\n\nb".*;
+    const result = replaceNewlinesForDisplay(&buf);
+    try std.testing.expectEqualStrings("a   b", result);
+}
+
+test "replaceNewlinesForDisplay single newline" {
+    var buf = "\n".*;
+    const result = replaceNewlinesForDisplay(&buf);
+    try std.testing.expectEqualStrings(" ", result);
+}
+
+test "replaceNewlinesForDisplay single character no newline" {
+    var buf = "x".*;
+    const result = replaceNewlinesForDisplay(&buf);
+    try std.testing.expectEqualStrings("x", result);
+}
+
+// =============================================================================
+// QF-082: ESC sequence length tests (verifying getKeyEventLength integration)
+// =============================================================================
+
+test "getKeyEventLength correctly measures arrow key ESC sequences in search context" {
+    // These are the exact sequences that would arrive in the search loop's
+    // read buffer. The search loop uses getKeyEventLength to skip them.
+    try std.testing.expectEqual(@as(usize, 3), input_mod.getKeyEventLength("\x1b[A")); // Up
+    try std.testing.expectEqual(@as(usize, 3), input_mod.getKeyEventLength("\x1b[B")); // Down
+    try std.testing.expectEqual(@as(usize, 3), input_mod.getKeyEventLength("\x1b[C")); // Right
+    try std.testing.expectEqual(@as(usize, 3), input_mod.getKeyEventLength("\x1b[D")); // Left
+}
+
+test "getKeyEventLength correctly measures extended ESC sequences" {
+    try std.testing.expectEqual(@as(usize, 4), input_mod.getKeyEventLength("\x1b[3~")); // Delete
+    try std.testing.expectEqual(@as(usize, 6), input_mod.getKeyEventLength("\x1b[1;5C")); // Ctrl+Right
+    try std.testing.expectEqual(@as(usize, 3), input_mod.getKeyEventLength("\x1bOH")); // Home (application mode)
+}
+
+test "getKeyEventLength returns 1 for bare ESC" {
+    // When a bare ESC arrives without following bytes, length is 1
+    try std.testing.expectEqual(@as(usize, 1), input_mod.getKeyEventLength("\x1b"));
+}
+
+test "getKeyEventLength handles ESC at end of partial buffer" {
+    // Simulate ESC as last byte in read buffer (no following bytes available)
+    const buf = [_]u8{0x1b};
+    try std.testing.expectEqual(@as(usize, 1), input_mod.getKeyEventLength(&buf));
+}
+
+test "getKeyEventLength handles ESC[ without third byte" {
+    // Partial sequence: ESC[ with no character code following
+    const buf = [_]u8{ 0x1b, '[' };
+    try std.testing.expectEqual(@as(usize, 2), input_mod.getKeyEventLength(&buf));
+}
+
+test "getKeyEventLength for alt-letter sequences used during search" {
+    // Alt+letter sends ESC followed by the letter
+    try std.testing.expectEqual(@as(usize, 2), input_mod.getKeyEventLength("\x1ba")); // Alt+a
+    try std.testing.expectEqual(@as(usize, 2), input_mod.getKeyEventLength("\x1bz")); // Alt+z
 }

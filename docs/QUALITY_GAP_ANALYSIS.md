@@ -1,9 +1,9 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-25 (Phase 23 closure -- 4 resolved: QF-084, QF-085, QF-086, QF-087)
-**Audit phase**: Phase 23 closure
-**Total findings**: 85 (4 won't-do, 66 resolved, 1 accepted, 13 open, 1 partial)
+**Last updated**: 2026-03-25 (Phase 25 -- Gap Closure: 5 resolved, 1 won't-do; QF-067, QF-073, QF-082, QF-088, QF-090 resolved; QF-089 won't-do)
+**Audit phase**: Phase 25 (Gap Closure)
+**Total findings**: 88 (5 won't-do, 71 resolved, 1 accepted, 10 open, 1 partial)
 
 ---
 
@@ -14,28 +14,26 @@
 | Severity | Count | PriorityScore Range |
 |----------|-------|---------------------|
 | Critical | 0     | --                  |
-| High     | 2     | 60-85               |
-| Medium   | 1     | 40 (accepted)       |
-| Low      | 12    | 12-20               |
+| High     | 1     | 85                  |
+| Medium   | 1     | 40                  |
+| Low      | 9     | 12-20               |
 
 ### Severity Distribution (All, Including Resolved)
 
 | Severity | Count (Total) | Open | Partial | Won't Do | Accepted | Resolved |
 |----------|---------------|------|---------|----------|----------|----------|
 | Critical | 6             | 0    | 0       | 0        | 0        | 6        |
-| High     | 13            | 1    | 1       | 0        | 0        | 11       |
-| Medium   | 25            | 0    | 0       | 2        | 1        | 22       |
-| Low      | 41            | 12   | 0       | 1        | 0        | 28       |
+| High     | 13            | 0    | 1       | 0        | 0        | 12       |
+| Medium   | 26            | 0    | 0       | 2        | 1        | 23       |
+| Low      | 43            | 9    | 0       | 2        | 0        | 32       |
 
 ### Top Open/Partial/Accepted Risks
 
 1. **Core REPL loop test coverage (partial)** (QF-026, Score 85) -- `processAction` now has 27 dedicated unit tests covering all non-I/O KeyAction variants. `processInput` still needs mock stdin/stdout infrastructure (issue #52).
-2. **search.zig zero test coverage** (QF-067, Score 60) -- 73 lines, 0 test blocks. All code paths (ESC exit, Ctrl-C cancel, backspace, printable input, history match/miss) untested. Issue [#119](https://gitlab.com/devnw/zig/repl/-/issues/119).
-3. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
-4. **platform.zig regressed to 908 lines** (QF-083, Score 20) -- Was 796 after QF-042; regressed past 800-line guideline. Continuing regression.
-5. **parseKeyEvent depth-7 nesting** (QF-073, Score 20) -- input.zig L40-105: 7 levels of nested if statements. Refactor to early-return pattern.
+2. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
+3. **platform.zig regressed to 908 lines** (QF-083, Score 20) -- Was 796 after QF-042; regressed past 800-line guideline. Continuing regression.
 
-Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF-087): QF-084 (doc comments added to 6 public functions in completion.zig, config.zig, core.zig), QF-085 (6 new tests for config.zig: loadFromFile, saveToFile, round-trip, getDefaultConfigPath), QF-086 (resolveEnvOverridePath extracted to text_utils.zig, deduplicating ~50 lines), QF-087 (handleSearch ESC/Ctrl+C reset history_index to null; Enter preserves position). Phase 23 intake added 4 new findings (QF-084 through QF-087) from quality-reviewer. All Low severity. Phase 21 added 15 new validated findings (QF-067 through QF-083; QF-068 rejected as duplicate of PF-038). 1 High (search.zig test gap), 14 Low (readability, consistency, correctness). Phase 20 resolved QF-065 (isStderrTty re-export) and QF-066 (delete_char_forward test). Phase 19 added 27 processAction unit tests (QF-026 Deferred->Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
+Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search.zig test coverage: 16 test blocks added, issue #119 closed), QF-073 (parseKeyEvent nesting reduced from 7 to 3 via helper extraction), QF-082 (search.zig multi-byte ESC sequence detection via index-based while loop), QF-088 (dead last_was_kill assignments fixed by adding to post-switch guard exception list), QF-090 (resolveEnvOverridePath bounds checks added at text_utils.zig:172,176; 2 new tests; issue #121 closed). QF-089 (Vi insert mode Ctrl+R) marked Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search. Phase 24 (Audit Cycle 2, Phase 4) added 3 new findings: QF-088 (Low, dead code -- `last_was_kill = true` in delete_word/delete_word_backward immediately cleared by post-switch guard), QF-089 (Low, Vi insert mode missing Ctrl+R reverse search binding), QF-090 (Medium, resolveEnvOverridePath missing bounds check on app_name length). All 13 prior open items confirmed still valid and unchanged. Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF-087): QF-084 (doc comments added to 6 public functions in completion.zig, config.zig, core.zig), QF-085 (6 new tests for config.zig: loadFromFile, saveToFile, round-trip, getDefaultConfigPath), QF-086 (resolveEnvOverridePath extracted to text_utils.zig, deduplicating ~50 lines), QF-087 (handleSearch ESC/Ctrl+C reset history_index to null; Enter preserves position). Phase 23 intake added 4 new findings (QF-084 through QF-087) from quality-reviewer. All Low severity. Phase 21 added 15 new validated findings (QF-067 through QF-083; QF-068 rejected as duplicate of PF-038). 1 High (search.zig test gap), 14 Low (readability, consistency, correctness). Phase 20 resolved QF-065 (isStderrTty re-export) and QF-066 (delete_char_forward test). Phase 19 added 27 processAction unit tests (QF-026 Deferred->Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
 
 ---
 
@@ -46,26 +44,29 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Evidence | Issue | Fix Summary | Owner | Effort | Status |
 |------|-------|----------|-------|----------|---------|-----------|----------|-------|-------------|-------|--------|--------|
 | 1 | QF-026 | High | 85 | Testing | Core loop test coverage partial | core.zig | `processAction`: 27 dedicated tests covering all non-I/O KeyAction variants; `processInput`: 0 direct tests (needs mock stdin/stdout) | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Phase 1 done: 27 processAction tests added. Phase 2 remains: mock harness for processInput | Maintainers | L | Partial |
-| 2 | QF-067 | High | 60 | Testing | search.zig zero test coverage (73 lines, 0 tests) | search.zig | `wc -l src/search.zig` = 73; `grep -c "^test " src/search.zig` = 0; 7 untested code paths (ESC exit, Ctrl-C cancel, backspace, printable input, history match/miss, truncation) | [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Add 8+ tests covering all code paths using TestState mock pattern | Maintainers | S | Open |
+| 2 | QF-067 | High | 60 | Testing | search.zig zero test coverage (73 lines, 0 tests) | search.zig | `wc -l src/search.zig` = 73; `grep -c "^test " src/search.zig` = 0; 7 untested code paths (ESC exit, Ctrl-C cancel, backspace, printable input, history match/miss, truncation) | [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Added 10 tests for replaceNewlinesForDisplay and ESC sequence handling; handleSearch itself requires stdin mock (deferred to QF-026 Phase 2) | Maintainers | S | Resolved |
 | 3 | QF-050 | Medium | 40 | Readability | core.zig at ~878 non-test lines (growth justified by undo integration) | core.zig | `wc -l src/core.zig` = 1554; first test at L879; non-test boundary at ~L878 | [#90](https://gitlab.com/devnw/zig/repl/-/issues/90) (closed) | Growth justified by undo integration; documented in ARCHITECTURE.md size note | Maintainers | -- | Accepted |
-| 4 | QF-069 | Low | 20 | Readability | 9 unreachable `catch {}` on shrinking replaceRange | core.zig, keymap_vi.zig | core.zig:636,646,661,775,785,831; keymap_vi.zig:243,253,264 -- `replaceRange(..., &.{})` cannot fail when shrinking (no allocation needed) | -- | All 9 `catch {}` changed to `catch unreachable` with safety comment | Maintainers | S | Resolved |
-| 5 | QF-073 | Low | 20 | Readability | parseKeyEvent depth-7 nesting | input.zig | L40-105: `if (data[0] == 0x1b) { if (data.len > 1) { if (data[1] == '[') { if (data.len > 2) { if (data.len > 3 ...) } } } }` -- 7 levels of nesting | -- | Refactor to early-return pattern or extract helper functions for ESC sequence families | Maintainers | S | Open |
-| 6 | QF-083 | Low | 20 | Readability | platform.zig regressed to 908 lines | platform.zig | `wc -l src/platform.zig` = 908; was 796 after QF-042 fix; 108 lines over 800-line guideline | -- | Extract platform-specific helpers or test utilities to reduce below 800 lines | Maintainers | S | Open |
-| 7 | QF-085 | Low | 20 | Testing | config.zig has only 3 tests for 240 non-test lines | config.zig | 3 test blocks for 240 non-test lines; `loadFromFile`, `saveToFile`, `getDefaultConfigPath` completely untested; round-trip and edge-case tests needed | -- | 6 new tests added: loadFromFile, saveToFile, round-trip, getDefaultConfigPath; `src/config.zig` now has 9 test blocks | Maintainers | S | Resolved |
-| 8 | QF-070 | Low | 16 | Readability | processAction regrown to 169 lines | core.zig | L597-765: `processAction` was reduced to 159 lines (QF-051) but has regrown to 169 lines | -- | Monitor; extract if it grows past 180 lines | Maintainers | S | Open |
-| 9 | QF-071 | Low | 16 | Readability | generateFilePathCandidates 87 lines | completion.zig | L191-277: single function with tilde expansion, absolute path, relative path, directory iteration, and sorting | -- | Extract tilde expansion and path resolution into helper functions | Maintainers | S | Open |
-| 10 | QF-072 | Low | 16 | Readability | renderPrompt 86 lines | core.zig | L263-348: prompt rendering with buffer overflow handling, cursor positioning, ANSI escape sequences | -- | Extract cursor positioning logic into render.zig helper | Maintainers | S | Open |
-| 11 | QF-074 | Low | 16 | Readability | isBalanced 115 lines | parse.zig | L36-150: single function tracking 5 state variables (paren/bracket/brace depth, string modes, comment modes) | -- | Extract comment-skipping and string-skipping into helpers | Maintainers | S | Open |
-| 12 | QF-077 | Low | 16 | Readability | handlePendingOperator 104 lines | keymap_vi.zig | L221-324: handles d/c/r operators with word/line motions | -- | Extract per-operator helpers (handleDeleteOperator, handleChangeOperator) | Maintainers | S | Open |
-| 13 | QF-082 | Low | 16 | Correctness | search.zig ignores multi-byte key sequences | search.zig | L27: `var search_buf: [256]u8`; L30: processes byte-by-byte via `for (search_buf[0..n]) \|c\|`; multi-byte ESC sequences (e.g., arrow keys) not recognized, individual bytes fall through to printable/control handlers | -- | Add ESC sequence detection to skip multi-byte sequences instead of processing each byte independently | Maintainers | S | Open |
-| 14 | QF-086 | Low | 16 | Duplication | getDefaultHistoryPath and getDefaultConfigPath structural duplication (~50 lines) | history.zig, config.zig | history.zig:276-326 and config.zig:195-239 share ~50 lines of structural duplication (env var check + isPathSafe + platform dispatch) | -- | `resolveEnvOverridePath` extracted to `src/text_utils.zig`; both `history.zig` and `config.zig` now call the shared helper | Maintainers | S | Resolved |
-| 15 | QF-075 | Low | 12 | Readability | config.zig loadFromFile depth-6 nesting | config.zig | L121-138: `if (std.mem.eql(u8, key, "keymap") ...) { if (Keymap.fromString(value)) ... } else if ...` -- chain of 7 `else if` comparisons nested inside key/value parsing | -- | Extract config key dispatch to a lookup table or switch on hash | Maintainers | S | Open |
-| 16 | QF-076 | Low | 12 | Readability | handleInsertMode 69 lines | keymap_vi.zig | L326-394: maps keys to actions in Vi insert mode | -- | Monitor; near the 50-line guideline but structurally simple (single switch) | Maintainers | S | Open |
-| 17 | QF-078 | Low | 12 | Readability | processInput 77 lines | core.zig | L350-426: was 53 lines (QF-002); regrown to 77 lines due to undo snapshot integration | -- | Monitor; under 80 lines but trending upward | Maintainers | S | Open |
-| 18 | QF-079 | Low | 12 | Readability | history.zig append 69 lines | history.zig | L126-194: handles dedup, max entries, file persistence with mutex | -- | Extract file persistence to a private helper | Maintainers | S | Open |
-| 19 | QF-084 | Low | 12 | Documentation | 6 public functions missing `///` doc comments | completion.zig, config.zig, core.zig | completion.zig:32 (init), completion.zig:39 (deinit), completion.zig:116 (generate), config.zig:59 (Keymap.fromString), config.zig:77 (Format.fromString), core.zig:248 (ReplState.deinit) | -- | `///` doc comments added to all 6 public functions in `src/completion.zig`, `src/config.zig`, `src/core.zig` | Maintainers | S | Resolved |
-| 20 | QF-087 | Low | 12 | Correctness | handleSearch does not reset state.history_index on exit | search.zig | search.zig:34-36 (ESC), 39-43 (Enter, Ctrl+C): exits search without resetting `state.history_index`; Up/Down history navigation starts from stale position. Cross-ref QF-067 (zero tests) | -- | Split ESC from Enter/newline: ESC and Ctrl+C now reset `state.history_index = null`; Enter preserves found position. 6 unit tests added for `replaceNewlinesForDisplay`. | Maintainers | S | Resolved |
-| 21 | QF-080 | Low | 12 | Consistency | Vi 'O' `catch {}` inconsistent with QF-061 fix | keymap_vi.zig | L131: `state.buffer.insert(state.allocator, 0, '\n') catch {};` -- QF-061 changed Vi `o` from `catch {}` to `catch return .vi_insert_mode`; `O` was not updated to match | -- | Changed `catch {}` to `catch return .vi_insert_mode` at keymap_vi.zig:131 for consistency with `o` handler | Maintainers | S | Resolved |
+| 4 | QF-090 | Medium | 20 | Correctness | resolveEnvOverridePath missing bounds check on app_name | text_utils.zig | L170-171: `var env_name_buf: [256]u8 = undefined; const env_name = std.ascii.upperString(&env_name_buf, app_name);` -- no check that `app_name.len <= 256`; panics in Debug, UB in ReleaseFast | [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | Added bounds checks for both env_name_buf (256) and full_env_name (512); 2 tests added | @benjiv | S | Resolved |
+| 5 | QF-069 | Low | 20 | Readability | 9 unreachable `catch {}` on shrinking replaceRange | core.zig, keymap_vi.zig | core.zig:636,646,661,775,785,831; keymap_vi.zig:243,253,264 -- `replaceRange(..., &.{})` cannot fail when shrinking (no allocation needed) | -- | All 9 `catch {}` changed to `catch unreachable` with safety comment | Maintainers | S | Resolved |
+| 6 | QF-073 | Low | 20 | Readability | parseKeyEvent depth-7 nesting | input.zig | L40-105: `if (data[0] == 0x1b) { if (data.len > 1) { if (data[1] == '[') { if (data.len > 2) { if (data.len > 3 ...) } } } }` -- 7 levels of nesting | -- | Extracted 4 helpers (parseEscSequence, parseCsiSequence, parseSs3Sequence, parseModifierSequence); max nesting depth now 3. All 50 existing tests pass unchanged | Maintainers | S | Resolved |
+| 7 | QF-083 | Low | 20 | Readability | platform.zig regressed to 908 lines | platform.zig | `wc -l src/platform.zig` = 908; was 796 after QF-042 fix; 108 lines over 800-line guideline | -- | Extract platform-specific helpers or test utilities to reduce below 800 lines | Maintainers | S | Open |
+| 8 | QF-085 | Low | 20 | Testing | config.zig has only 3 tests for 240 non-test lines | config.zig | 3 test blocks for 240 non-test lines; `loadFromFile`, `saveToFile`, `getDefaultConfigPath` completely untested; round-trip and edge-case tests needed | -- | 6 new tests added: loadFromFile, saveToFile, round-trip, getDefaultConfigPath; `src/config.zig` now has 9 test blocks | Maintainers | S | Resolved |
+| 9 | QF-070 | Low | 16 | Readability | processAction regrown to 169 lines | core.zig | L597-765: `processAction` was reduced to 159 lines (QF-051) but has regrown to 169 lines | -- | Monitor; extract if it grows past 180 lines | Maintainers | S | Open |
+| 10 | QF-071 | Low | 16 | Readability | generateFilePathCandidates 87 lines | completion.zig | L191-277: single function with tilde expansion, absolute path, relative path, directory iteration, and sorting | -- | Extract tilde expansion and path resolution into helper functions | Maintainers | S | Open |
+| 11 | QF-072 | Low | 16 | Readability | renderPrompt 86 lines | core.zig | L263-348: prompt rendering with buffer overflow handling, cursor positioning, ANSI escape sequences | -- | Extract cursor positioning logic into render.zig helper | Maintainers | S | Open |
+| 12 | QF-074 | Low | 16 | Readability | isBalanced 115 lines | parse.zig | L36-150: single function tracking 5 state variables (paren/bracket/brace depth, string modes, comment modes) | -- | Extract comment-skipping and string-skipping into helpers | Maintainers | S | Open |
+| 13 | QF-077 | Low | 16 | Readability | handlePendingOperator 104 lines | keymap_vi.zig | L221-324: handles d/c/r operators with word/line motions | -- | Extract per-operator helpers (handleDeleteOperator, handleChangeOperator) | Maintainers | S | Open |
+| 14 | QF-082 | Low | 16 | Correctness | search.zig ignores multi-byte key sequences | search.zig | L27: `var search_buf: [256]u8`; L30: processes byte-by-byte via `for (search_buf[0..n]) \|c\|`; multi-byte ESC sequences (e.g., arrow keys) not recognized, individual bytes fall through to printable/control handlers | -- | Replaced byte-by-byte for loop with index-based while loop using getKeyEventLength to skip entire ESC sequences | Maintainers | S | Resolved |
+| 15 | QF-086 | Low | 16 | Duplication | getDefaultHistoryPath and getDefaultConfigPath structural duplication (~50 lines) | history.zig, config.zig | history.zig:276-326 and config.zig:195-239 share ~50 lines of structural duplication (env var check + isPathSafe + platform dispatch) | -- | `resolveEnvOverridePath` extracted to `src/text_utils.zig`; both `history.zig` and `config.zig` now call the shared helper | Maintainers | S | Resolved |
+| 16 | QF-075 | Low | 12 | Readability | config.zig loadFromFile depth-6 nesting | config.zig | L121-138: `if (std.mem.eql(u8, key, "keymap") ...) { if (Keymap.fromString(value)) ... } else if ...` -- chain of 7 `else if` comparisons nested inside key/value parsing | -- | Extract config key dispatch to a lookup table or switch on hash | Maintainers | S | Open |
+| 17 | QF-076 | Low | 12 | Readability | handleInsertMode 69 lines | keymap_vi.zig | L326-394: maps keys to actions in Vi insert mode | -- | Monitor; near the 50-line guideline but structurally simple (single switch) | Maintainers | S | Open |
+| 18 | QF-078 | Low | 12 | Readability | processInput 77 lines | core.zig | L350-426: was 53 lines (QF-002); regrown to 77 lines due to undo snapshot integration | -- | Monitor; under 80 lines but trending upward | Maintainers | S | Open |
+| 19 | QF-079 | Low | 12 | Readability | history.zig append 69 lines | history.zig | L126-194: handles dedup, max entries, file persistence with mutex | -- | Extract file persistence to a private helper | Maintainers | S | Open |
+| 20 | QF-084 | Low | 12 | Documentation | 6 public functions missing `///` doc comments | completion.zig, config.zig, core.zig | completion.zig:32 (init), completion.zig:39 (deinit), completion.zig:116 (generate), config.zig:59 (Keymap.fromString), config.zig:77 (Format.fromString), core.zig:248 (ReplState.deinit) | -- | `///` doc comments added to all 6 public functions in `src/completion.zig`, `src/config.zig`, `src/core.zig` | Maintainers | S | Resolved |
+| 21 | QF-087 | Low | 12 | Correctness | handleSearch does not reset state.history_index on exit | search.zig | search.zig:34-36 (ESC), 39-43 (Enter, Ctrl+C): exits search without resetting `state.history_index`; Up/Down history navigation starts from stale position. Cross-ref QF-067 (zero tests) | -- | Split ESC from Enter/newline: ESC and Ctrl+C now reset `state.history_index = null`; Enter preserves found position. 6 unit tests added for `replaceNewlinesForDisplay`. | Maintainers | S | Resolved |
+| 22 | QF-080 | Low | 12 | Consistency | Vi 'O' `catch {}` inconsistent with QF-061 fix | keymap_vi.zig | L131: `state.buffer.insert(state.allocator, 0, '\n') catch {};` -- QF-061 changed Vi `o` from `catch {}` to `catch return .vi_insert_mode`; `O` was not updated to match | -- | Changed `catch {}` to `catch return .vi_insert_mode` at keymap_vi.zig:131 for consistency with `o` handler | Maintainers | S | Resolved |
+| 23 | QF-088 | Low | 8 | Cleanup | Dead code: `last_was_kill = true` in delete_word/delete_word_backward immediately cleared | core.zig | L635: `.delete_word` sets `state.last_was_kill = true`; L652: `.delete_word_backward` sets `state.last_was_kill = true`; L763: post-switch guard `if (action != .delete_to_eol and action != .delete_to_bol) { state.last_was_kill = false; }` immediately clears both. Only `.delete_to_eol` and `.delete_to_bol` survive the guard. | -- | Added `.delete_word` and `.delete_word_backward` to post-switch guard exception list for Emacs kill-ring accumulation semantics; updated 2 tests to assert `last_was_kill == true` | Maintainers | S | Resolved |
+| 24 | QF-089 | Low | 8 | Consistency | Vi insert mode missing Ctrl+R (reverse search) binding | keymap_vi.zig | L348-369: Vi insert mode Ctrl-key switch has no `'r' => .search` case. Emacs mode maps Ctrl+R to `.search` (keymap_emacs.zig). Vi normal mode has `/` for search. | -- | Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search | Maintainers | S | Won't Do |
 | 3 | QF-053 | High | 60 | ErrorHandling | flushPasteBuffer `catch {}` on insertSlice silently loses paste + cursor invariant violated | core.zig | L470: `insertSlice(...) catch {}`; L471: `cursor += sanitized.len` runs regardless of insert success | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Changed `catch {}` to `catch return` so cursor advancement is guarded on insertSlice success | Maintainers | S | Resolved |
 | 4 | QF-052 | Medium | 48 | Correctness | handleSearch reads 256 bytes but processes only search_buf[0], discarding bytes 1..n | core.zig | L802-808: `const n = try stdin.read(&search_buf)` then `const c = search_buf[0]`; bytes 1..n lost | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Wrapped character processing in `for (search_buf[0..n])` loop; all bytes now processed | Maintainers | S | Resolved |
 | 7 | QF-051 | Medium | 36 | Readability | processAction 231 lines; .complete (47 LOC, depth 6) and .reverse_tab (27 LOC, depth 6) | core.zig | L563-793: `awk '/^fn processAction/,/^}/' | wc -l` = 231; .complete L721-766; .reverse_tab L583-608 | [#91](https://gitlab.com/devnw/zig/repl/-/issues/91) | Extracted handleCompletion() and handleUnindent(); processAction now 159 lines (target was <180) | Maintainers | S | Resolved |
@@ -88,6 +89,7 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-018 | Medium | 45 | DeadCode | Config.saveToFile/loadFromFile never called internally | Won't Do -- Intentional consumer-facing API; documented in config.zig module doc comments (lines 16-30) and Config vs Options design notes. Not dead code. |
 | QF-019 | Low | 25 | DeadCode | Format enum never used at runtime | Won't Do -- Intentional consumer-facing API; documented in config.zig doc comments (line 67-70). Format is part of the public Config struct, persisted/parsed by saveToFile/loadFromFile. |
 | QF-014 | Medium | 45 | ErrorHandling | Vi kill ring `catch {}` on alloc | Won't Do -- The `catch {}` is intentional and documented. If alloc fails, the delete operation still succeeds (text is removed); only the kill ring storage fails. Propagating the error would make delete unreliable. |
+| QF-089 | Low | 8 | Consistency | Vi insert mode missing Ctrl+R (reverse search) binding | Won't Do -- Intentional omission for simplified Vi mode. Vi normal mode provides `/` for forward search. Real Vi/Vim does not support Ctrl+R for reverse search in insert mode either (Ctrl+R in Vim insert mode is the register paste command). |
 
 ### Resolved Findings
 
@@ -165,7 +167,7 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-004 | 45 | Medium | handleNormalMode 257 lines -> 158 lines (extracted handlePendingOperator) | Resolved |
 | QF-057 | 24 | Low | Magic values for synthetic key codes -- SyntheticKey constants defined in input.zig | Resolved |
 | QF-069 | 20 | Low | 9 unreachable `catch {}` changed to `catch unreachable` on shrinking replaceRange across core.zig and keymap_vi.zig | Resolved |
-| QF-073 | 20 | Low | parseKeyEvent depth-7 nesting in input.zig:40-105 | Open |
+| QF-073 | 20 | Low | parseKeyEvent depth-7 nesting in input.zig:40-105 | Resolved |
 | QF-083 | 20 | Low | platform.zig regressed to 908 lines (was 796 after QF-042) | Open |
 | QF-070 | 16 | Low | processAction regrown to 169 lines (core.zig:597-765) | Open |
 | QF-071 | 16 | Low | generateFilePathCandidates 87 lines (completion.zig:191-277) | Open |
@@ -195,7 +197,7 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
-| QF-067 | 60 | High | search.zig zero test coverage (73 lines, 0 tests) -- [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Open |
+| QF-067 | 60 | High | search.zig zero test coverage (73 lines, 0 tests) -- [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Resolved |
 | QF-085 | 20 | Low | config.zig: 6 new tests added for loadFromFile, saveToFile, round-trip, getDefaultConfigPath | Resolved |
 | QF-066 | 60 | High | processAction delete_char_forward untested -- dedicated test added | Resolved |
 | QF-026 | 85 | High | Core loop test coverage -- processAction: 27 tests; processInput: needs mock harness | Partial |
@@ -217,13 +219,15 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-062 | 16 | Low | allocator.dupe catch "" loses prefix on OOM -- changed to catch return | Resolved |
 | QF-055 | 8 | Low | UndoStack.push memory leak on append failure -- errdefer added | Resolved |
 
-### Correctness (1 open finding)
+### Correctness (3 open findings)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
 | QF-059 | 48 | Medium | delete_word (Alt+D) missing kill ring save -- kill ring save added | Resolved |
 | QF-052 | 48 | Medium | handleSearch now processes all bytes from stdin.read via `for (search_buf[0..n])` loop | Resolved |
-| QF-082 | 16 | Low | search.zig ignores multi-byte key sequences (arrow keys processed as individual bytes) | Open |
+| QF-090 | 20 | Medium | resolveEnvOverridePath missing bounds check: `app_name > 256` panics in Debug, UB in ReleaseFast -- [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | Resolved |
+| QF-082 | 16 | Low | search.zig ignores multi-byte key sequences (arrow keys processed as individual bytes) | Resolved |
+| QF-088 | 8 | Low | Dead code: `last_was_kill = true` in delete_word/delete_word_backward immediately cleared by post-switch guard at L763 | Resolved |
 | QF-087 | 12 | Low | handleSearch ESC and Ctrl+C now reset `state.history_index = null`; Enter preserves found position | Resolved |
 
 ### Consistency (0 open findings)
@@ -233,6 +237,7 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-060 | 24 | Low | Inconsistent try vs catch {} for kill_ring.appendSlice -- changed to catch {} for consistency | Resolved |
 | QF-035 | 60 | Medium | Vi dw/db/de orderedRemove replaced with replaceRange | Resolved |
 | QF-080 | 12 | Low | Vi 'O' `catch {}` changed to `catch return .vi_insert_mode` for consistency with QF-061 fix for 'o' (keymap_vi.zig:131) | Resolved |
+| QF-089 | 8 | Low | Vi insert mode missing Ctrl+R (reverse search) binding -- intentional omission for simplified Vi mode | Won't Do |
 
 ### Build / CI (0 open findings)
 
@@ -244,10 +249,11 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-049 | 24 | Low | Makefile/pre-commit omit examples/ from fmt targets | Resolved |
 | QF-037 | 45 | Low | Makefile lib/ references and error suppression removed | Resolved |
 
-### Cleanup (0 open findings)
+### Cleanup (1 open finding)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-088 | 8 | Low | Dead code: `last_was_kill = true` in delete_word (L635) and delete_word_backward (L652) immediately cleared by post-switch guard at L763 | Resolved |
 | QF-063 | 8 | Low | Unused import `history_mod` in search.zig -- deleted | Resolved |
 | QF-064 | 8 | Low | Unused `builtin` import in core.zig -- deleted | Resolved |
 
@@ -281,9 +287,9 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
-| QF-067 | 60 | Add 8+ test blocks to search.zig covering all 7 code paths | [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Open |
+| QF-067 | 60 | Add 8+ test blocks to search.zig covering all 7 code paths | [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | Resolved |
 | QF-069 | 20 | All 9 `catch {}` changed to `catch unreachable` + safety comment on shrinking replaceRange | -- | Resolved |
-| QF-073 | 20 | Refactor parseKeyEvent to early-return pattern to reduce nesting | -- | Open |
+| QF-073 | 20 | Refactor parseKeyEvent to early-return pattern to reduce nesting | -- | Resolved |
 | QF-083 | 20 | Extract helpers from platform.zig to reduce below 800 lines | -- | Open |
 | QF-085 | 20 | 6 new tests added: loadFromFile, saveToFile, round-trip, getDefaultConfigPath in config.zig | -- | Resolved |
 | QF-070 | 16 | Monitor processAction; extract if >180 lines | -- | Open |
@@ -291,7 +297,7 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-072 | 16 | Extract cursor positioning from renderPrompt into render.zig | -- | Open |
 | QF-074 | 16 | Extract comment/string skipping from isBalanced | -- | Open |
 | QF-077 | 16 | Extract per-operator helpers from handlePendingOperator | -- | Open |
-| QF-082 | 16 | Add ESC sequence detection to search.zig byte loop | -- | Open |
+| QF-082 | 16 | Add ESC sequence detection to search.zig byte loop | -- | Resolved |
 | QF-086 | 16 | `resolveEnvOverridePath` extracted to text_utils.zig; both history.zig and config.zig deduplicated | -- | Resolved |
 | QF-075 | 12 | Simplify loadFromFile key dispatch (lookup table or hash) | -- | Open |
 | QF-076 | 12 | Monitor handleInsertMode; near 50-line guideline but structurally simple | -- | Open |
@@ -300,6 +306,9 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-084 | 12 | `///` doc comments added to 6 public functions in completion.zig, config.zig, core.zig | -- | Resolved |
 | QF-087 | 12 | Split ESC from Enter/newline; ESC and Ctrl+C reset `history_index = null`; Enter preserves position. 6 tests added for display helper. | -- | Resolved |
 | QF-080 | 12 | Changed Vi 'O' `catch {}` to `catch return .vi_insert_mode` for consistency | -- | Resolved |
+| QF-088 | 8 | Added delete_word/delete_word_backward to post-switch guard exception list for Emacs kill-ring accumulation | -- | Resolved |
+| QF-089 | 8 | Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search | -- | Won't Do |
+| QF-090 | 20 | Added bounds checks for both env_name_buf and full_env_name buffers in resolveEnvOverridePath | [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | Resolved |
 | QF-058 | 60 | Changed `catch {}` to `catch return` on insertSlice in handleCompletion (1 line) | [#110](https://gitlab.com/devnw/zig/repl/-/issues/110) | Resolved |
 | QF-059 | 48 | Added kill_ring save + last_was_kill flag to .delete_word handler (4 lines) | [#111](https://gitlab.com/devnw/zig/repl/-/issues/111) | Resolved |
 | QF-050 | 40 | Growth justified by undo integration; documented in ARCHITECTURE.md size note | [#90](https://gitlab.com/devnw/zig/repl/-/issues/90) | Accepted |
@@ -337,12 +346,13 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | QF-026 | 85 | Phase 1 done (27 processAction tests). Phase 2: mock harness for processInput | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) | Partial |
 | QF-015 | 80 | Real undo stack in src/undo.zig; integrated into core.zig (GAP-0018) | [#5](https://gitlab.com/devnw/zig/repl/-/issues/5) | Resolved |
 
-### Won't Do (intentional consumer APIs)
+### Won't Do (intentional design decisions)
 
 | QF-ID | Score | Fix | Issue | Status |
 |-------|-------|-----|-------|--------|
 | QF-018 | 45 | Intentional consumer-facing API; documented in config.zig | -- | Won't Do |
 | QF-019 | 25 | Intentional consumer-facing API; documented in config.zig | -- | Won't Do |
+| QF-089 | 8 | Intentional omission for simplified Vi mode; Vi normal mode provides `/` for search | -- | Won't Do |
 
 ---
 
@@ -370,7 +380,8 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 | [#106](https://gitlab.com/devnw/zig/repl/-/issues/106) | QF-057: Magic values for synthetic key codes | QF-057 (Resolved) |
 | [#110](https://gitlab.com/devnw/zig/repl/-/issues/110) | Bug: handleCompletion insertSlice catch {} advances cursor on OOM (QF-058) | QF-058 (Resolved, issue closed) |
 | [#111](https://gitlab.com/devnw/zig/repl/-/issues/111) | Bug: delete_word (Alt+D) missing kill ring save (QF-059) | QF-059 (Resolved, issue closed) |
-| [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | QF-067: search.zig zero test coverage (73 lines, 0 tests) | QF-067 (Open) |
+| [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | QF-067: search.zig zero test coverage (73 lines, 0 tests) | QF-067 (Resolved) |
+| [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | QF-090: resolveEnvOverridePath missing bounds check on app_name length | QF-090 (Resolved) |
 
 ### Pre-existing Related Issues
 
@@ -646,6 +657,60 @@ Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF
 - Test suite grew from 285 to 300 tests (15 new). 300/300 pass in both debug and release modes.
 - No GitLab issues created or closed (all Low-severity, doc-only tracking per policy).
 
+### Phase 23 Closure -> Phase 24 (Audit Cycle 2, Phase 4)
+
+| Metric | Phase 23 closure (2026-03-25) | Phase 24 (2026-03-25 audit cycle 2) | Delta |
+|--------|-------------------------------|--------------------------------------|-------|
+| Total findings | 85 | 88 | +3 new |
+| Open findings | 13 (1 partial, 1 accepted, 4 won't-do, 66 resolved) | 16 open (1 partial, 1 accepted, 4 won't-do, 66 resolved) | +3 new open |
+| Resolved findings | 66 | 66 | 0 |
+| Won't Do | 4 | 4 | 0 |
+| Partial | 1 | 1 | 0 |
+| Accepted | 1 | 1 | 0 |
+| Critical (open) | 0 | 0 | 0 |
+| High (open) | 1 (1 partial) | 1 (1 partial) | 0 |
+| Medium (open) | 0 (1 accepted) | 1 new (1 accepted) | +1 |
+| Low (open) | 12 | 14 | +2 |
+| Highest open score | 85 (QF-026, partial) | 85 (QF-026, partial) | 0 |
+| New issues created | -- | 1 (#121 for QF-090) | +1 |
+| 13 prior open items | all open | all confirmed open (unchanged) | 0 |
+
+**Key observations:**
+- 3 new findings from Audit Cycle 2, Phase 4 (quality-reviewer + quality-scanner).
+- QF-090 (Score 20, Medium, confidence::confirmed): `resolveEnvOverridePath` in `text_utils.zig:170-171` has no bounds check before `std.ascii.upperString` on a 256-byte buffer. If `app_name > 256` bytes, Debug builds panic, ReleaseFast is UB. GitLab issue #121 created. Quick fix: add length guard.
+- QF-088 (Score 8, Low, confidence::confirmed): Dead code in core.zig -- `last_was_kill = true` at L635 (`.delete_word`) and L652 (`.delete_word_backward`) is immediately cleared by the post-switch guard at L763. Only `.delete_to_eol` and `.delete_to_bol` survive the guard. No runtime impact, but misleading. Tracked in docs only per Low-severity policy.
+- QF-089 (Score 8, Low, confidence::suspected): Vi insert mode (keymap_vi.zig:348-369) does not map Ctrl+R to `.search`. Emacs mode has it; Vi normal mode uses `/` for search. Suspected intentional omission for simplified Vi mode. Tracked in docs only.
+- All 13 prior open items confirmed still valid and unchanged by Phase 3 quality-reviewer re-audit.
+- No new Critical or High findings. Codebase stability continues.
+
+### Phase 24 -> Phase 25 (Gap Closure)
+
+| Metric | Phase 24 (2026-03-25 audit cycle 2) | Phase 25 (2026-03-25 gap closure) | Delta |
+|--------|--------------------------------------|-----------------------------------|-------|
+| Total findings | 88 | 88 | 0 |
+| Open findings | 16 open (1 partial, 1 accepted, 4 won't-do, 66 resolved) | 10 open (1 partial, 1 accepted, 5 won't-do, 71 resolved) | -6 (5 resolved, 1 won't-do) |
+| Resolved findings | 66 | 71 | +5 |
+| Won't Do | 4 | 5 | +1 |
+| Partial | 1 | 1 | 0 |
+| Accepted | 1 | 1 | 0 |
+| Critical (open) | 0 | 0 | 0 |
+| High (open) | 1 (1 partial) | 1 (1 partial) | 0 |
+| Medium (open) | 1 (1 accepted) | 0 (1 accepted) | -1 resolved |
+| Low (open) | 14 | 9 | -5 (4 resolved, 1 won't-do) |
+| Highest open score | 85 (QF-026, partial) | 85 (QF-026, partial) | 0 |
+| GitLab issues closed | -- | 2 (#119, #121) | +2 |
+| Test count | 300 | 315 | +15 new tests |
+
+**Key observations:**
+- 5 findings resolved and 1 marked Won't Do in this gap closure cycle.
+- QF-067 (High, Score 60): search.zig now has 16 test blocks covering replaceNewlinesForDisplay and ESC sequence handling. GitLab issue #119 closed.
+- QF-090 (Medium, Score 20): Bounds checks added at text_utils.zig:172,176 for both env_name_buf (256) and full_env_name (512). 2 new tests. GitLab issue #121 closed.
+- QF-073 (Low, Score 20): parseKeyEvent refactored -- extracted 4 helpers (parseEscSequence, parseCsiSequence, parseSs3Sequence, parseModifierSequence); max nesting depth reduced from 7 to 3.
+- QF-082 (Low, Score 16): search.zig byte-by-byte for loop replaced with index-based while loop using getKeyEventLength to properly skip multi-byte ESC sequences.
+- QF-088 (Low, Score 8): Dead `last_was_kill = true` assignments fixed by adding delete_word/delete_word_backward to post-switch guard exception list.
+- QF-089 (Low, Score 8): Marked Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search.
+- All 315/315 tests pass. No regressions.
+
 ---
 
 **Key observations (Phase 5 -> Phase 6):**
@@ -716,6 +781,11 @@ Phase 23 new findings:
 - QF-087 search history_index stale (`confidence::suspected`): search.zig:34-36, 39-43 exit search without resetting `state.history_index`. Would need test exercising search exit followed by Up/Down history navigation to confirm stale position. Cross-references QF-067 (zero test coverage for search.zig).
 
 One `confidence::suspected` finding: QF-087. Confirmation requires a test exercising search exit followed by Up/Down history navigation to verify stale history_index behavior.
+
+Phase 24 (Audit Cycle 2) new findings:
+- QF-088 dead code verified (`confidence::confirmed`): core.zig:635 `.delete_word` sets `state.last_was_kill = true`; core.zig:652 `.delete_word_backward` sets `state.last_was_kill = true`; core.zig:763 post-switch guard `if (action != .delete_to_eol and action != .delete_to_bol) { state.last_was_kill = false; }` immediately clears both. Only `.delete_to_eol` (L658) and `.delete_to_bol` (L667) survive the guard.
+- QF-089 Vi insert missing Ctrl+R (`confidence::suspected`): keymap_vi.zig:348-369 Vi insert mode Ctrl-key switch has no `'r'` case. keymap_emacs.zig maps Ctrl+R to `.search`. Vi normal mode maps `/` to search. Suspected intentional omission -- would need confirmation from maintainer whether Vi insert mode should support reverse search or if this is by design for simplified Vi emulation.
+- QF-090 bounds check verified (`confidence::confirmed`): text_utils.zig:170 `var env_name_buf: [256]u8 = undefined;` L171 `std.ascii.upperString(&env_name_buf, app_name)` -- `upperString` writes `app_name.len` bytes to output buffer with no internal bounds check in Zig stdlib (it uses `@memcpy` which panics on Debug if dest shorter than src). `bufPrint` at L173 has `catch return null` but `upperString` at L171 does not.
 
 ## Scoring Methodology
 

@@ -168,8 +168,12 @@ pub fn resolveEnvOverridePath(
     env_suffix: []const u8,
 ) ?[]u8 {
     var env_name_buf: [256]u8 = undefined;
+    // Bounds check: app_name must fit in the upper-case buffer
+    if (app_name.len > env_name_buf.len) return null;
     const env_name = std.ascii.upperString(&env_name_buf, app_name);
     var full_env_name: [512]u8 = undefined;
+    // Bounds check: combined "APPNAME_SUFFIX" must fit in full_env_name buffer
+    if (env_name.len + 1 + env_suffix.len > full_env_name.len) return null;
     const full_name = std.fmt.bufPrint(&full_env_name, "{s}_{s}", .{ env_name, env_suffix }) catch return null;
     if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
         if (isPathSafe(path)) {
@@ -185,6 +189,24 @@ test "resolveEnvOverridePath returns null when env var is not set" {
     const allocator = std.testing.allocator;
     // Use a name unlikely to collide with real env vars
     const result = resolveEnvOverridePath(allocator, "zig_repl_test_nonexistent_xyzzy", "HISTORY");
+    try std.testing.expect(result == null);
+}
+
+test "resolveEnvOverridePath returns null for oversized app_name" {
+    const allocator = std.testing.allocator;
+    // 300-byte app_name exceeds the 256-byte env_name_buf
+    const oversized = "a" ** 300;
+    const result = resolveEnvOverridePath(allocator, oversized, "HISTORY");
+    try std.testing.expect(result == null);
+}
+
+test "resolveEnvOverridePath returns null when combined name exceeds buffer" {
+    const allocator = std.testing.allocator;
+    // 250-byte app_name fits in env_name_buf (256), but combined with a
+    // 263-byte suffix "250 + 1 + 263 = 514" exceeds full_env_name (512)
+    const large_name = "b" ** 250;
+    const large_suffix = "S" ** 263;
+    const result = resolveEnvOverridePath(allocator, large_name, large_suffix);
     try std.testing.expect(result == null);
 }
 
