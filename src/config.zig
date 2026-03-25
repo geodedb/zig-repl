@@ -32,7 +32,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const text_utils = @import("text_utils.zig");
-const isPathSafe = text_utils.isPathSafe;
 const platform = @import("platform.zig");
 
 /// REPL configuration options.
@@ -56,6 +55,7 @@ pub const Config = struct {
         emacs,
         vi,
 
+        /// Convert a string ("emacs", "vi", or "vim") to the corresponding Keymap value, or null if unrecognized.
         pub fn fromString(s: []const u8) ?Keymap {
             if (std.mem.eql(u8, s, "emacs")) return .emacs;
             if (std.mem.eql(u8, s, "vi")) return .vi;
@@ -74,6 +74,7 @@ pub const Config = struct {
         csv,
         table,
 
+        /// Convert a string to the corresponding Format value, or null if unrecognized.
         pub fn fromString(s: []const u8) ?Format {
             if (std.mem.eql(u8, s, "text")) return .text;
             if (std.mem.eql(u8, s, "json")) return .json;
@@ -194,17 +195,9 @@ pub const Config = struct {
 /// 3. Fallback to `.<app_name>_config` in the current directory
 pub fn getDefaultConfigPath(allocator: std.mem.Allocator, app_name: []const u8) ![]u8 {
     // Check environment variable first (APP_CONFIG)
-    var env_name_buf: [256]u8 = undefined;
-    const env_name = std.ascii.upperString(&env_name_buf, app_name);
-    var full_env_name: [512]u8 = undefined;
-    const full_name = std.fmt.bufPrint(&full_env_name, "{s}_CONFIG", .{env_name}) catch app_name;
-    if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
-        if (isPathSafe(path)) {
-            return path;
-        }
-        // Path failed validation; free and fall through to defaults
-        allocator.free(path);
-    } else |_| {}
+    if (text_utils.resolveEnvOverridePath(allocator, app_name, "CONFIG")) |path| {
+        return path;
+    }
 
     // Use platform-specific conventions
     if (builtin.os.tag == .windows) {
@@ -258,6 +251,143 @@ test "format from string" {
     try std.testing.expect(Config.Format.fromString("csv") == .csv);
     try std.testing.expect(Config.Format.fromString("table") == .table);
     try std.testing.expect(Config.Format.fromString("invalid") == null);
+}
+
+test "loadFromFile with valid config" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/test_repl_config_valid.conf";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Write a known config file
+    {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+        try file.writeAll(
+            \\# Test config
+            \\keymap=vi
+            \\format=json
+            \\history=false
+            \\timing=true
+            \\verbose=true
+            \\colors=false
+            \\max_history=1000
+            \\
+        );
+    }
+
+    const config = try Config.loadFromFile(allocator, path);
+    try std.testing.expect(config.keymap == .vi);
+    try std.testing.expect(config.format == .json);
+    try std.testing.expect(!config.history_enabled);
+    try std.testing.expect(config.timing_enabled);
+    try std.testing.expect(config.verbose);
+    try std.testing.expect(!config.colors_enabled);
+    try std.testing.expect(config.max_history == 1000);
+}
+
+test "loadFromFile with missing file" {
+    const allocator = std.testing.allocator;
+
+    const config = try Config.loadFromFile(allocator, "/tmp/nonexistent_repl_config_98237.conf");
+    // Should return defaults
+    try std.testing.expect(config.keymap == .emacs);
+    try std.testing.expect(config.history_enabled);
+    try std.testing.expect(!config.timing_enabled);
+    try std.testing.expect(!config.verbose);
+    try std.testing.expect(config.max_history == 5000);
+}
+
+test "loadFromFile with malformed content" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/test_repl_config_malformed.conf";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Write lines without '=', empty lines, unknown keys
+    {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+        try file.writeAll(
+            \\this line has no equals
+            \\
+            \\unknown_key=some_value
+            \\# comment line
+            \\keymap=vi
+            \\format=invalid_format
+            \\max_history=not_a_number
+            \\
+        );
+    }
+
+    const config = try Config.loadFromFile(allocator, path);
+    // Only valid key=value pairs should be applied
+    try std.testing.expect(config.keymap == .vi);
+    // Invalid format should be ignored, keeping default
+    try std.testing.expect(config.format == .text);
+    // Invalid max_history should be ignored, keeping default
+    try std.testing.expect(config.max_history == 5000);
+}
+
+test "saveToFile creates valid config" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/test_repl_config_save.conf";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    var config = Config{};
+    config.keymap = .vi;
+    config.format = .csv;
+    config.timing_enabled = true;
+    config.max_history = 2000;
+
+    try config.saveToFile(allocator, path);
+
+    // Read back the raw file content and verify expected key=value pairs
+    const file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+    defer allocator.free(content);
+
+    try std.testing.expect(std.mem.indexOf(u8, content, "keymap=vi") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "format=csv") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "timing=true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, content, "max_history=2000") != null);
+}
+
+test "saveToFile and loadFromFile round-trip" {
+    const allocator = std.testing.allocator;
+    const path = "/tmp/test_repl_config_roundtrip.conf";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    // Save a non-default config
+    var original = Config{};
+    original.keymap = .vi;
+    original.format = .table;
+    original.history_enabled = false;
+    original.timing_enabled = true;
+    original.verbose = true;
+    original.colors_enabled = false;
+    original.max_history = 999;
+
+    try original.saveToFile(allocator, path);
+
+    // Load it back
+    const loaded = try Config.loadFromFile(allocator, path);
+
+    try std.testing.expect(loaded.keymap == .vi);
+    try std.testing.expect(loaded.format == .table);
+    try std.testing.expect(!loaded.history_enabled);
+    try std.testing.expect(loaded.timing_enabled);
+    try std.testing.expect(loaded.verbose);
+    try std.testing.expect(!loaded.colors_enabled);
+    try std.testing.expect(loaded.max_history == 999);
+}
+
+test "getDefaultConfigPath returns valid path" {
+    const allocator = std.testing.allocator;
+
+    const path = try getDefaultConfigPath(allocator, "test_app");
+    defer allocator.free(path);
+
+    try std.testing.expect(path.len > 0);
 }
 
 // isPathSafe tests are in text_utils.zig (canonical location)

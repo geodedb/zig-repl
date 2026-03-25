@@ -13,7 +13,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const text_utils = @import("text_utils.zig");
-const isPathSafe = text_utils.isPathSafe;
 
 /// Manages command history with optional persistence.
 pub const HistoryStore = struct {
@@ -275,17 +274,9 @@ pub const HistoryStore = struct {
 /// - app_name: Application name for history file naming
 pub fn getDefaultHistoryPath(allocator: std.mem.Allocator, app_name: []const u8) ![]u8 {
     // Check environment variable first (APP_HISTORY)
-    var env_name_buf: [256]u8 = undefined;
-    const env_name = std.ascii.upperString(&env_name_buf, app_name);
-    var full_env_name: [512]u8 = undefined;
-    const full_name = std.fmt.bufPrint(&full_env_name, "{s}_HISTORY", .{env_name}) catch app_name;
-    if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
-        if (isPathSafe(path)) {
-            return path;
-        }
-        // Path failed validation; free and fall through to defaults
-        allocator.free(path);
-    } else |_| {}
+    if (text_utils.resolveEnvOverridePath(allocator, app_name, "HISTORY")) |path| {
+        return path;
+    }
 
     // Primary: Try ~/.{app}_history as the default preference
     if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {

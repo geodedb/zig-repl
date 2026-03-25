@@ -29,6 +29,7 @@ pub const CompletionContext = struct {
     /// Whether completion is active (cycling through candidates)
     active: bool = false,
 
+    /// Initialize a CompletionContext with the given allocator, ready to collect candidates.
     pub fn init(allocator: std.mem.Allocator) CompletionContext {
         return .{
             .allocator = allocator,
@@ -36,6 +37,7 @@ pub const CompletionContext = struct {
         };
     }
 
+    /// Free all allocated candidates and the stored prefix.
     pub fn deinit(self: *CompletionContext) void {
         for (self.candidates.items) |candidate| {
             self.allocator.free(candidate);
@@ -113,6 +115,7 @@ pub const CompletionProvider = struct {
     /// User-defined context data
     context: ?*anyopaque = null,
 
+    /// Delegate to the underlying generateFn callback to produce completion candidates for the given prefix.
     pub fn generate(
         self: *const CompletionProvider,
         ctx: *CompletionContext,
@@ -130,7 +133,9 @@ pub const CompletionProvider = struct {
 /// This is a consumer-facing API: the REPL core does not call it internally.
 /// Library users call this helper to build a `CompletionProvider` backed by a
 /// fixed keyword list (e.g., SQL reserved words, REPL meta-commands).
-pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
+///
+/// The `keywords` pointer must outlive the returned provider.
+pub fn keywordProvider(keywords: *const []const []const u8) CompletionProvider {
     const Impl = struct {
         fn generate(
             provider: *const CompletionProvider,
@@ -143,7 +148,8 @@ pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
             _ = buffer;
             _ = cursor;
             _ = word_start;
-            const kw_list: []const []const u8 = @ptrCast(@alignCast(provider.context.?));
+            const kw_ptr: *const []const []const u8 = @ptrCast(@alignCast(provider.context.?));
+            const kw_list = kw_ptr.*;
 
             // Convert prefix to uppercase for case-insensitive matching
             var upper_prefix: [256]u8 = undefined;
@@ -165,7 +171,7 @@ pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
 
     return CompletionProvider{
         .generateFn = Impl.generate,
-        .context = @ptrCast(@constCast(&keywords)),
+        .context = @ptrCast(@constCast(keywords)),
     };
 }
 
@@ -388,6 +394,46 @@ test "file path candidates limited to MAX_FILE_CANDIDATES" {
     try std.testing.expect(ctx.candidates.items.len <= MAX_FILE_CANDIDATES);
     // And since we created more files than the limit, it should be exactly the limit
     try std.testing.expect(ctx.candidates.items.len == MAX_FILE_CANDIDATES);
+}
+
+test "keywordProvider generates matching candidates" {
+    const allocator = std.testing.allocator;
+
+    const keywords: []const []const u8 = &.{ "SELECT", "SET", "SHOW", "INSERT", "UPDATE" };
+    const provider = keywordProvider(&keywords);
+
+    var ctx = CompletionContext.init(allocator);
+    defer ctx.deinit();
+
+    // Call generate after keywordProvider has returned -- this would
+    // read from a dangling stack pointer if the old by-value parameter
+    // was still used (SF-030).
+    const handled = try provider.generate(&ctx, "", 0, 0, "SE");
+    try std.testing.expect(handled);
+    try std.testing.expect(ctx.candidates.items.len == 2);
+    // Candidates should be SELECT and SET (both start with "SE")
+    var found_select = false;
+    var found_set = false;
+    for (ctx.candidates.items) |c| {
+        if (std.mem.eql(u8, c, "SELECT")) found_select = true;
+        if (std.mem.eql(u8, c, "SET")) found_set = true;
+    }
+    try std.testing.expect(found_select);
+    try std.testing.expect(found_set);
+}
+
+test "keywordProvider returns false when no keywords match" {
+    const allocator = std.testing.allocator;
+
+    const keywords: []const []const u8 = &.{ "SELECT", "INSERT" };
+    const provider = keywordProvider(&keywords);
+
+    var ctx = CompletionContext.init(allocator);
+    defer ctx.deinit();
+
+    const handled = try provider.generate(&ctx, "", 0, 0, "ZZ");
+    try std.testing.expect(!handled);
+    try std.testing.expect(ctx.candidates.items.len == 0);
 }
 
 test "getHomeDir returns a non-null value on POSIX when HOME is set" {

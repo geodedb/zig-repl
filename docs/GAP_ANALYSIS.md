@@ -1,11 +1,11 @@
 # Gap Analysis Report
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Date:** 2026-03-25 (Phase 16 -- 0 new gaps added, 7 resolved)
-**Previous audit:** 2026-03-24 (Phase 15, 8 open gaps)
+**Date:** 2026-03-25 (Phase 18 -- 0 new gaps added, 0 resolved)
+**Previous audit:** 2026-03-25 (Phase 17, 1 open gap)
 **Auditor:** Principal Engineer Audit (Claude Opus 4.6)
 **Zig Version Installed:** 0.15.2
-**Build Status:** Tests pass (`zig build test` exits 0, 285 tests)
+**Build Status:** Tests pass (`zig build test` exits 0, 300 tests)
 
 ---
 
@@ -16,8 +16,8 @@
 - **Total open gaps:** 1
 - **Carried forward (still open):** 1 (GAP-0052 -- blocked on #31)
 - **New this phase:** 0
-- **Resolved this phase:** 7 (GAP-0059..GAP-0065)
-- **Previous resolved cycles:** 57 gaps resolved across Phases 1-14. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
+- **Resolved this phase:** 0
+- **Previous resolved cycles:** 64 gaps resolved across Phases 1-16. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Gap-ID | Title | Category | Severity | Issue | Status |
 |--------|-------|----------|----------|-------|--------|
-| GAP-0052 | SECURITY.md release signing claim unverified | Security | Medium | [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) | Open (blocked) |
+| GAP-0052 | SECURITY.md release signing partially verified -- docs and CI enforcement missing | Security | Medium | [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) | Open (partial) |
 
 ---
 
@@ -78,20 +78,27 @@
 - **Evidence:** `README.md` -- all issues listed in Contributing help-needed section are open in GitLab.
 - **Resolved date:** 2026-03-24
 
-### GAP-0052: SECURITY.md release signing claim unverified
+### GAP-0052: SECURITY.md release signing partially verified -- docs and CI enforcement missing
 - **Issue:** [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (existing -- do NOT create duplicate)
 - **Category:** Security
 - **Severity:** Medium
 - **Requirement source:** SECURITY.md:41; GitLab issue #31
 - **Current state (evidence):**
   - `SECURITY.md:41` -- claims "All releases are tagged and signed"
-  - No evidence of signing keys, CI signing steps, or verification instructions
+  - `git tag -v v0.1.0` -- tag IS signed (ECDSA key SHA256:c+tO0MB9d6c4N2U4a+lYakImvwZXOqaiZwkBPphZ91o), verified good signature
+  - Documentation of signing key and verification instructions: NOT present
+  - CI enforcement of tag signing: NOT implemented
   - Blocked on existing GitLab issue #31 (open)
-- **Why this is a gap:** SECURITY.md makes a claim about release signing that cannot be verified. No signing infrastructure or documentation exists.
-- **Impact/Risk:** Users may trust release integrity based on an unverified claim. If signing is not actually implemented, this is a misleading security assertion.
-- **Recommended fix:** Either implement release signing (GPG key, CI automation, verification instructions) or revise the SECURITY.md claim to match the actual state.
+- **Why this is a gap:** Tags are signed in practice, but SECURITY.md lacks verification instructions for users, and CI does not enforce signing on release tags. The signing claim is partially substantiated but not fully documented or automated.
+- **Impact/Risk:** Users cannot independently verify release signatures without documentation of the signing key and verification steps. Unsigned tags could be pushed if CI does not enforce signing.
+- **Recommended fix:**
+  1. Add verification instructions to SECURITY.md (key fingerprint, `git tag -v` command)
+  2. Add CI job to enforce tag signature verification on release pipelines
+  3. Document the signing key identity and rotation policy
 - **Acceptance criteria:**
-  - Either release signing is implemented and documented, or the SECURITY.md claim is revised to match reality
+  - SECURITY.md contains verification instructions with key fingerprint
+  - CI pipeline rejects unsigned release tags
+  - Key rotation policy is documented
 
 ### GAP-0053: GAP_ANALYSIS.md test count stale (257 -> 285) [RESOLVED]
 - **Issue:** -- (doc staleness)
@@ -258,7 +265,7 @@
 25. ~~**GAP-0049** -- Add 5 missing files to CONTRIBUTING.md docs/ tree (Low, Docs)~~ Resolved (issue #108 closed)
 26. ~~**GAP-0050** -- Remove closed issues #1, #15 from README Current Priorities (Low, Docs)~~ Resolved (issue #109 closed)
 27. ~~**GAP-0051** -- Remove closed issues #15, #21 from README Contributing section (Low, Docs)~~ Resolved (issue #109 closed)
-28. **GAP-0052** -- Resolve SECURITY.md release signing claim (Medium, Security) -- [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (blocked)
+28. **GAP-0052** -- Resolve SECURITY.md release signing: tags signed but docs and CI enforcement missing (Medium, Security) -- [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (open/partial)
 
 ### Phase 9: Full audit findings (2026-03-24) -- COMPLETED
 29. ~~**GAP-0053** -- Update stale test count in GAP_ANALYSIS.md (Low, Docs)~~ Resolved

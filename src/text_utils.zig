@@ -154,6 +154,41 @@ test "isPathSafe allows dots that are not traversal" {
 }
 
 // =============================================================================
+// Environment variable path resolution
+// =============================================================================
+
+/// Check for an environment variable override path for the given app and suffix.
+/// Builds the env var name as UPPERCASE(app_name) + "_" + env_suffix (e.g., "MYAPP_HISTORY"),
+/// then checks getEnvVarOwned and validates the result with isPathSafe.
+/// Returns the path if the env var is set and passes safety validation, null otherwise.
+/// Caller owns the returned memory.
+pub fn resolveEnvOverridePath(
+    allocator: std.mem.Allocator,
+    app_name: []const u8,
+    env_suffix: []const u8,
+) ?[]u8 {
+    var env_name_buf: [256]u8 = undefined;
+    const env_name = std.ascii.upperString(&env_name_buf, app_name);
+    var full_env_name: [512]u8 = undefined;
+    const full_name = std.fmt.bufPrint(&full_env_name, "{s}_{s}", .{ env_name, env_suffix }) catch return null;
+    if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
+        if (isPathSafe(path)) {
+            return path;
+        }
+        // Path failed validation; free and fall through
+        allocator.free(path);
+    } else |_| {}
+    return null;
+}
+
+test "resolveEnvOverridePath returns null when env var is not set" {
+    const allocator = std.testing.allocator;
+    // Use a name unlikely to collide with real env vars
+    const result = resolveEnvOverridePath(allocator, "zig_repl_test_nonexistent_xyzzy", "HISTORY");
+    try std.testing.expect(result == null);
+}
+
+// =============================================================================
 // Control character filtering and paste sanitization
 // =============================================================================
 

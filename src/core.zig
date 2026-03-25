@@ -245,6 +245,7 @@ pub const ReplState = struct {
     user_context: ?*anyopaque,
     verbose: bool,
 
+    /// Release all resources owned by the REPL state (buffers, undo stack, history store).
     pub fn deinit(self: *ReplState) void {
         self.buffer.deinit(self.allocator);
         self.kill_ring.deinit(self.allocator);

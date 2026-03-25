@@ -1,22 +1,22 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-24 (Phase 13 new findings)
+**Date:** 2026-03-25 (Phase 14 new findings)
 **Auditor:** Security Reviewer (automated + manual code review)
 **Scope:** Full source tree at commit `f8eab0c` (branch: main)
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 10 (Phase 13 -- 5 new findings SF-024 through SF-028)
+**Revision:** 12 (Phase 15 closure -- SF-030 resolved; 3 open [3 Low])
 
 ---
 
 ## Overall Assessment
 
-**No Critical or High severity findings. 3 open findings (3 Low). 28 total SF-IDs tracked.**
+**No Critical or High severity findings. 3 open findings (3 Low). 30 total SF-IDs tracked.**
 
 The Zig REPL library maintains a sound security posture for a v0.1.0 release. The codebase
 is memory-safe by default (Zig's safety checks), has no external C dependencies, and
-uses minimal attack surface. Since the initial audit (2026-03-23), **20 of 28 findings
-have been resolved**, with 3 marked Won't Do, 1 confirmed No Action Needed, and 3 open (3 Low).
+uses minimal attack surface. Since the initial audit (2026-03-23), **21 of 30 findings
+have been resolved** (22 unique root causes; SF-002 reclassified as SF-014), with 3 marked Won't Do, 1 confirmed No Action Needed, and 3 open (3 Low).
 
 Phase 9 audit (2026-03-24) performed a Phase 3 deep review. NC-001 and NC-002 (existing
 Low findings from Phase 2) were re-confirmed at Low severity with no changes. Two new
@@ -41,6 +41,10 @@ Phase 13 new findings (2026-03-24) identified 5 new validated findings (SF-024 t
 - **SF-026**: Undo buffer `appendSlice` bypasses display sanitization (`src/core.zig:741`) -- **Open** (Low/Info, risk 5). Theoretical only; no action required.
 - **SF-027**: `saved_termios` global not async-signal-safe (`src/platform.zig:25,39,210,237`) -- **Open** (Low, risk 8). Mitigated by SA_RESETHAND one-shot and narrow race window.
 - **SF-028**: `delete_to_eol` directly mutates ArrayList length field (`src/core.zig:654`) -- **Open** (Low/Info, risk 5). Informational; optional cleanup.
+
+Phase 14 new findings (2026-03-25) identified 2 new validated findings (SF-029 and SF-030):
+- **SF-029**: Search display writes buffer content without CRLF conversion or control-char replacement (`src/search.zig:67-71`) -- **Resolved**. Added `replaceNewlinesForDisplay()` helper to replace `\n` with space in display buffer.
+- **SF-030**: `keywordProvider` stores pointer to stack-local parameter via `@ptrCast(@constCast(&keywords))` (`src/completion.zig:168`) -- **Resolved** (Phase 15). Parameter changed from by-value slice to pointer type, eliminating dangling pointer.
 
 See "Phase 5 Manual Review Findings" section below for details on MF-001 through MF-005
 findings from Phase 5.
@@ -67,17 +71,18 @@ findings from Phase 5.
 
 ## Audit Progression
 
-| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Delta (Phase 12 to 13) |
-|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|------------------------|
-| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 23 | 28 | +5 |
-| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 5 | +5 |
-| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | 18 | 18 | 0 |
-| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
-| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | +1 |
-| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | +4 |
-| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | +5 new |
+| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Phase 14 (2026-03-25) | Phase 15 (2026-03-25) | Delta (Phase 14 to 15) |
+|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|----------------------|----------------------|------------------------|
+| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 23 | 28 | 30 | 30 | 0 |
+| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 5 | 5 | 3 | -2 (SF-029, SF-030 resolved) |
+| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | 18 | 18 | 20 | 22 | +2 |
+| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
+| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | 4 | 3 | -1 (SF-030 resolved) |
+| Info severity (open) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | -1 (SF-029 resolved) |
+| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | 2 new findings (SF-029, SF-030) | SF-029, SF-030 resolved | +2 resolved |
 
 ---
 
@@ -87,20 +92,20 @@ findings from Phase 5.
 |----------|-------|------|----------|----------|-----------|-----|
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
 | High | 0 | 0 | 0 | 0 | 0 | 30 days |
-| Medium | 7 | 0 | 6 | 0 | 0 | 90 days |
-| Low | 21 | 3 | 14 | 3 | 1 | 180 days |
-| Info | 0 | 0 | 0 | 0 | 0 | Backlog |
-| **Total** | **28** | **3** | **20** | **3** | **1** | |
+| Medium | 7 | 0 | 7 | 0 | 0 | 90 days |
+| Low | 22 | 3 | 15 | 3 | 1 | 180 days |
+| Info | 1 | 0 | 1 | 0 | 0 | Backlog |
+| **Total** | **30** | **3** | **23** | **3** | **1** | |
 
-Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-026 and SF-028 are informational Low findings (risk 5).
+Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-025 resolved in Phase 13 (Medium resolved count updated from 6 to 7). SF-026 and SF-028 are informational Low findings (risk 5). SF-029 resolved (Info-severity, cosmetic display fix). SF-030 resolved (Phase 15 -- parameter changed to pointer type).
 
-### 3 open findings: 3 Low (SF-026, SF-027, SF-028). No Critical, High, or Medium findings.
+### 3 open findings: 3 Low (SF-026, SF-027, SF-028). No Critical, High, Medium, or Info findings.
 
 ---
 
 ## Stack-Ranked Findings Table
 
-### Open Findings (Phase 13, updated Phase 16)
+### Open Findings (Phase 15)
 
 | Rank | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Evidence (file:line) | Confidence | SLA |
 |------|-------|----------|------------|---------|-----------|-------------|----------------------|------------|-----|
@@ -448,6 +453,120 @@ state.buffer.items.len = state.cursor;
 **Acceptance criteria:** N/A -- informational finding. If addressed, the line would use the ArrayList API method instead of direct field mutation.
 
 **Affected paths:** `src/core.zig`
+
+---
+
+## Phase 14 Findings (2026-03-25)
+
+Phase 14 identified 2 new validated findings from targeted code review of search display
+rendering and the `keywordProvider` consumer API. Both findings are confirmed via source
+code evidence.
+
+Per existing policy, no GitLab issues are created for Low or Info findings -- they are
+tracked in this gap analysis only.
+
+### SF-029: Search display garbled on multi-line history entries [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Info |
+| **Risk Score** | 3 (Impact: 1 x Likelihood: 1 x 4, rounded down due to zero security impact) |
+| **CWE** | CWE-116: Improper Encoding or Escaping of Output |
+| **OWASP** | N/A |
+| **Confidence** | confirmed |
+| **Exploit Surface** | N/A -- purely cosmetic |
+| **Status** | **Resolved** |
+| **SLA** | Backlog |
+| **Resolution** | Added `replaceNewlinesForDisplay()` helper that replaces `\n` with space in the display buffer after `bufPrint`, before `writeAll`. Six unit tests added. `state.buffer` is never modified. |
+
+**Summary:** The search display at `src/search.zig:67-71` writes `state.buffer.items` to the terminal as part of the reverse-i-search prompt line. When a matching history entry contains multi-line content (i.e., embedded `\n` characters), the newlines are written directly to the terminal in raw mode without CRLF conversion or control-character replacement. This causes garbled display output because raw mode requires explicit `\r\n` sequences for proper line advancement.
+
+**Impact:** Purely cosmetic. The terminal display becomes garbled when a multi-line history entry is matched during reverse-i-search. No data corruption, no security boundary violation, no information disclosure. The user can press Escape or Ctrl-C to exit search and the terminal renders correctly again.
+
+**Likelihood:** Low practical impact. Multi-line history entries are uncommon in typical REPL usage. The garbled display is immediately visible and self-correcting on search exit.
+
+**Evidence:**
+```
+// src/search.zig:67-71
+const search_line = std.fmt.bufPrint(&line_buf, "\r(reverse-i-search)`{s}': {s}", .{
+    state.search_buffer.items,
+    if (found) state.buffer.items else "",  // buffer may contain \n from multi-line history
+}) catch &line_buf;
+try stdout.writeAll(search_line);
+```
+
+The `state.buffer.items` slice is written verbatim. If the matched history entry contains `\n`, the terminal in raw mode will advance the line without returning the cursor to column 0, producing garbled output.
+
+**Attack scenario:** Not applicable. This is a display quality issue with no security implications. An attacker cannot exploit garbled search display to achieve any security objective.
+
+**How to verify:** Add a multi-line entry to the history (e.g., a string containing `\n`), then use Ctrl-R reverse search to match it. Observe garbled terminal output.
+
+**Fix guidance:** Replace `\n` characters in the display buffer with a visual placeholder (e.g., `\u{2424}` or a space) before writing to the terminal, or convert `\n` to `\r\n` for raw mode display. This is a UX improvement, not a security fix.
+
+**Acceptance criteria:** Multi-line history entries display cleanly during reverse-i-search without garbling the terminal.
+
+**Affected paths:** `src/search.zig`
+
+---
+
+### SF-030: keywordProvider returns dangling pointer to stack-local parameter [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 12 (Impact: 3 x Likelihood: 1 x 4) |
+| **CWE** | CWE-416: Use After Free / CWE-825: Expired Pointer Dereference |
+| **OWASP** | N/A (library API, not web/API) |
+| **Confidence** | confirmed |
+| **Exploit Surface** | Consumer code that calls `keywordProvider()` and later invokes `provider.generate()` |
+| **Status** | **Resolved** |
+| **SLA** | 180 days (2026-09-21) -- resolved well within SLA |
+| **Resolution** | Parameter changed from by-value slice (`keywords: []const []const u8`) to pointer type, eliminating the dangling pointer. The returned `CompletionProvider` now holds a valid reference to caller-owned storage. |
+| **Resolved date** | 2026-03-25 |
+
+**Summary:** The `keywordProvider` function at `src/completion.zig:133-170` accepts a `keywords: []const []const u8` parameter (a slice passed by value on the stack) and stores a pointer to that stack-local parameter via `@ptrCast(@constCast(&keywords))` at line 168. The returned `CompletionProvider` struct contains this pointer in its `.context` field. After `keywordProvider` returns, the stack frame is deallocated and the pointer becomes dangling. Any subsequent call to `provider.generate()` (which reads `provider.context.?` at line 146) dereferences the expired pointer.
+
+**Impact:** Undefined behavior when a consumer calls the returned provider's `generate` function. In `ReleaseFast` mode (no safety checks), this reads from a deallocated stack frame, which may return garbage data, cause a segfault, or silently produce incorrect completions. In `Debug` and `ReleaseSafe` modes, Zig's safety checks may detect the invalid memory access. The REPL core does NOT use `keywordProvider` internally -- this only affects library consumers who use this public API.
+
+**Likelihood:** Low overall, but certain for any consumer who uses the API as designed. The function signature and documentation suggest it should work (accepting a keyword list and returning a provider), but the returned provider is immediately invalid. The saving grace is that no internal code path calls this function, so the bug is dormant unless a consumer discovers and uses the API.
+
+**Evidence:**
+```
+// src/completion.zig:133 -- function signature (keywords is a stack-local parameter)
+pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
+
+// src/completion.zig:166-169 -- stores pointer to stack-local
+    return CompletionProvider{
+        .generateFn = Impl.generate,
+        .context = @ptrCast(@constCast(&keywords)),  // dangling after return
+    };
+}
+
+// src/completion.zig:146 -- dereferences the dangling pointer in generate()
+const kw_list: []const []const u8 = @ptrCast(@alignCast(provider.context.?));
+```
+
+**Attack scenario:** A consumer application creates a keyword provider for SQL reserved words: `const provider = keywordProvider(&.{"SELECT", "INSERT", "UPDATE"});`. Later, when the user presses Tab, the REPL calls `provider.generate()`, which dereferences the dangling pointer. In `ReleaseFast`, this reads whatever data now occupies that stack location, potentially returning arbitrary memory contents as "completions" (information leak) or crashing (denial of service). In an adversarial scenario, if an attacker can influence what occupies the stack frame after `keywordProvider` returns, they could control what the pointer dereferences.
+
+**How to verify:** Write a test that calls `keywordProvider`, then calls `provider.generateFn` on the returned provider. In `Debug` mode, Zig's safety checks should detect the use-after-free. In `ReleaseFast`, the behavior is undefined.
+
+**Fix guidance:** Change the function to accept a pointer to the slice rather than a by-value slice, ensuring the caller is responsible for the lifetime:
+```zig
+pub fn keywordProvider(keywords: *const []const []const u8) CompletionProvider {
+    return CompletionProvider{
+        .generateFn = Impl.generate,
+        .context = @ptrCast(@constCast(keywords)),
+    };
+}
+```
+Alternatively, store the slice value directly (Zig slices are pointer+length, 16 bytes) in the context field if the `?*anyopaque` field can be repurposed, or add a dedicated `slice_context` field to `CompletionProvider`.
+
+**Acceptance criteria:**
+- `keywordProvider` returns a `CompletionProvider` that remains valid after the function returns
+- Calling `provider.generate()` correctly iterates the keyword list without undefined behavior
+- A test demonstrates that the returned provider works correctly when `generate` is called after `keywordProvider` returns
+
+**Affected paths:** `src/completion.zig`
 
 ---
 
@@ -875,19 +994,19 @@ No new action required.
 ## Risk Distribution
 
 ```
-OPEN (5 findings):
-35  [=======]     SF-025  Signal handler uses std.os.linux.* (portability) [OPEN]
-8   [==]          SF-024  History clear() missing chmod             [OPEN]
+OPEN (4 findings):
+12  [===]         SF-030  keywordProvider dangling pointer          [RESOLVED]
 8   [==]          SF-027  saved_termios not async-signal-safe       [OPEN]
 5   [=]           SF-026  Undo buffer bypasses sanitization (theoretical) [OPEN]
 5   [=]           SF-028  delete_to_eol mutates ArrayList length    [OPEN]
 
-RESOLVED (18 findings):
+RESOLVED (21 findings):
 50  [==========]  SF-014  Signal handler dead code                 [RESOLVED]
 45  [=========]   SF-001  History/config world-readable            [RESOLVED]
 40  [========]    SF-005  Bracketed paste forgery                  [RESOLVED]
 35  [=======]     SF-009  Terminal escape injection                [RESOLVED]
 35  [=======]     SF-013  Search bypasses history filtering        [RESOLVED]
+35  [=======]     SF-025  Signal handler uses std.os.linux.*       [RESOLVED]
 25  [=====]       SF-007  Env var path injection                   [RESOLVED]
 20  [====]        SF-003  @intCast overflow (32-bit)               [RESOLVED]
 20  [====]        SF-016  Paste buffer flush-and-continue          [RESOLVED]
@@ -898,6 +1017,7 @@ RESOLVED (18 findings):
 10  [==]          SF-019  Vi de/e underflow guard restructured     [RESOLVED]
 10  [==]          SF-006  catch unreachable                        [RESOLVED]
 10  [==]          SF-011  False fuzz claim                         [RESOLVED]
+8   [==]          SF-024  History clear() missing chmod             [RESOLVED]
 8   [==]          SF-023  Config file missing chmod (same as SF-022) [RESOLVED]
 8   [==]          SF-021  Static mutable home_dir_buf (thread safety) [RESOLVED]
 8   [==]          SF-022  History file TOCTOU on permissions        [RESOLVED]
@@ -917,12 +1037,14 @@ NO ACTION NEEDED (1 finding):
 
 | CWE ID | CWE Name | Count | Findings | Status |
 |--------|----------|-------|----------|--------|
-| CWE-474 | Use of Function with Inconsistent Implementations | 1 | SF-025 | **Open** |
+| CWE-416 | Use After Free | 1 | SF-030 | **Resolved** |
+| CWE-825 | Expired Pointer Dereference | 1 | SF-030 | **Resolved** (same finding, dual CWE) |
+| CWE-474 | Use of Function with Inconsistent Implementations | 1 | SF-025 | Resolved |
 | CWE-404 | Improper Resource Shutdown or Release | 1 | SF-014 | Resolved |
 | CWE-362 | Race Condition (Shared Resource) | 1 | SF-021 | Resolved |
 | CWE-364 | Signal Handler Race Condition | 1 | SF-027 | **Open** |
 | CWE-367 | TOCTOU Race Condition | 1 | SF-022 | Resolved |
-| CWE-116 | Improper Encoding or Escaping | 4 | SF-009, SF-013, SF-017, SF-026 | SF-009/013/017 Resolved, SF-026 **Open** (theoretical) |
+| CWE-116 | Improper Encoding or Escaping | 5 | SF-009, SF-013, SF-017, SF-026, SF-029 | SF-009/013/017/029 Resolved, SF-026 **Open** (theoretical) |
 | CWE-119 | Improper Restriction of Operations within Bounds | 1 | SF-028 | **Open** (informational) |
 | CWE-130 | Length Parameter Inconsistency | 3 | SF-010, SF-016, SF-018 | All Resolved |
 | CWE-191 | Integer Underflow | 1 | SF-019 | Resolved |
@@ -930,7 +1052,7 @@ NO ACTION NEEDED (1 finding):
 | CWE-74 | Injection | 2 | SF-005, SF-015 | SF-005 Resolved, SF-015 Won't Do |
 | CWE-829 | Untrusted Control Sphere | 1 | SF-012 | Won't Do |
 | CWE-22 | Path Traversal | 1 | SF-008 | Won't Do (by design) |
-| CWE-732 | Incorrect Permission Assignment | 3 | SF-001, SF-023, SF-024 | SF-001/023 Resolved, SF-024 **Open** |
+| CWE-732 | Incorrect Permission Assignment | 3 | SF-001, SF-023, SF-024 | All Resolved |
 | CWE-426 | Untrusted Search Path | 1 | SF-007 | Resolved |
 | CWE-190 | Integer Overflow | 1 | SF-003 | Resolved |
 | CWE-248 | Uncaught Exception | 1 | SF-006 | Resolved |
@@ -940,18 +1062,18 @@ NO ACTION NEEDED (1 finding):
 
 ## Findings by Area
 
-### Terminal / Platform (6 findings, 2 open)
+### Terminal / Platform (6 findings, 1 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
 | SF-014 | 50 | Signal handler dead code -- now wired into enterRawMode/restoreTerminalMode | **Resolved** |
-| SF-025 | 35 | Signal handler uses `std.os.linux.*` on all POSIX -- blocks macOS/FreeBSD | **Open** |
+| SF-025 | 35 | Signal handler uses `std.os.linux.*` on all POSIX -- blocks macOS/FreeBSD | **Resolved** |
 | SF-018 | 15 | renderPrompt fixed buffer -- buffer_full flag stops writes on overflow | **Resolved** |
 | SF-010 | 15 | Silent output truncation >4096 bytes | Resolved |
 | SF-006 | 10 | catch unreachable on init | Resolved |
 | SF-027 | 8 | `saved_termios` global not async-signal-safe (mitigated by SA_RESETHAND) | **Open** |
 
-### Input Handling / Completion (9 findings, 2 open)
+### Input Handling / Completion (11 findings, 2 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
@@ -959,13 +1081,15 @@ NO ACTION NEEDED (1 finding):
 | SF-009 | 35 | Terminal escape injection from history | Resolved |
 | SF-013 | 35 | Search result bypasses history filtering | **Resolved** |
 | SF-016 | 20 | Paste buffer flush-and-continue for arbitrarily large pastes | **Resolved** |
+| SF-030 | 12 | `keywordProvider` returns dangling pointer to stack-local parameter | **Resolved** |
 | SF-017 | 10 | Search display -- input filter documented as intentional guard | **Resolved** |
 | SF-015 | 10 | Paste sanitization fragmentation gap (theoretical) | **Won't Do** |
 | SF-021 | 8 | Static mutable `home_dir_buf` without thread safety (Windows-only) | **Resolved** |
 | SF-026 | 5 | Undo buffer `appendSlice` bypasses display sanitization (theoretical) | **Open** (informational) |
 | SF-028 | 5 | `delete_to_eol` directly mutates ArrayList length field | **Open** (informational) |
+| SF-029 | 3 | Search display garbled on multi-line history entries (cosmetic) | **Resolved** |
 
-### File System / Access Control (6 findings, 1 open)
+### File System / Access Control (6 findings, 0 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
@@ -974,7 +1098,7 @@ NO ACTION NEEDED (1 finding):
 | SF-008 | 15 | File path completion traversal | **Won't Do** (by design) |
 | SF-023 | 8 | Config file missing chmod on pre-existing file | **Resolved** |
 | SF-022 | 8 | History file TOCTOU on permissions | **Resolved** |
-| SF-024 | 8 | History `clear()` missing chmod on pre-existing file | **Open** |
+| SF-024 | 8 | History `clear()` missing chmod on pre-existing file | **Resolved** |
 
 ### Vi Keymap (1 finding, 0 open)
 
@@ -982,13 +1106,13 @@ NO ACTION NEEDED (1 finding):
 |-------|------|---------|--------|
 | SF-019 | 10 | Vi de/e command fragile underflow guard | **Resolved** |
 
-### History (3 findings, 1 open)
+### History (3 findings, 0 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
 | SF-003 | 20 | @intCast overflow on 32-bit | Resolved |
 | SF-022 | 8 | History file TOCTOU on permissions (also in File System section) | **Resolved** |
-| SF-024 | 8 | History `clear()` missing chmod on pre-existing file (also in File System section) | **Open** |
+| SF-024 | 8 | History `clear()` missing chmod on pre-existing file (also in File System section) | **Resolved** |
 
 ### Supply Chain / CI (2 findings, 0 open)
 
@@ -1012,10 +1136,12 @@ NO ACTION NEEDED (1 finding):
 
 | SF-ID | Fix | Effort | Status |
 |-------|-----|--------|--------|
-| SF-024 | Add `file.chmod(0o600)` after createFile in `clear()` (same pattern as `appendLine()`) | 5 min | **Open** |
+| SF-030 | Changed `keywordProvider` parameter to pointer type, eliminating dangling pointer | 15 min | **Resolved** |
+| SF-029 | Added `replaceNewlinesForDisplay` helper + 6 unit tests in search.zig | 10 min | **Resolved** |
 | SF-028 | Replace `items.len = cursor` with `shrinkRetainingCapacity(cursor)` | 5 min | **Open** (optional) |
 | SF-026 | Add safety comment documenting undo path is pre-sanitized | 5 min | **Open** (optional) |
 | SF-027 | Document SA_RESETHAND mitigation as accepted risk, or add atomic flag | 30 min | **Open** |
+| SF-024 | Add `file.chmod(0o600)` after createFile in `clear()` (same pattern as `appendLine()`) | 5 min | Resolved |
 | SF-021 | Change `var home_dir_buf` to `threadlocal var home_dir_buf` | 5 min | Resolved |
 | SF-022 | Add `file.chmod(0o600)` after opening existing history files | 15 min | Resolved |
 | SF-019 | Restructured while-loop condition to `end + 1 < state.buffer.items.len` | 15 min | Resolved |
@@ -1026,7 +1152,7 @@ NO ACTION NEEDED (1 finding):
 
 | SF-ID | Fix | Effort | Status |
 |-------|-----|--------|--------|
-| SF-025 | Replace `std.os.linux.*` with `std.posix.system.*` or comptime os.tag switch in signal handler | 2-4 hours | **Open** |
+| SF-025 | Replace `std.os.linux.*` with `std.posix.system.*` or comptime os.tag switch in signal handler | 2-4 hours | Resolved |
 | SF-016 | Flush-and-continue: paste buffer flushes to edit buffer when full | 1-2 hours | Resolved |
 | SF-018 | buffer_full flag: writes stop cleanly on overflow, cursor positioning skipped | 2-4 hours | Resolved |
 
@@ -1059,15 +1185,21 @@ All automated security scanners returned zero findings across all phases (initia
 
 **No immediate rotation or emergency remediation required.** No leaked secrets, no active RCE, no authentication bypass.
 
-**Phase 13 action summary:**
-- **SF-025 (Medium, risk 35):** GitLab issue created. Blocks macOS/FreeBSD support. 90-day SLA (2026-06-22). Recommended for next sprint.
-- **SF-024 (Low, risk 8):** Quick fix (5 min). Add chmod after createFile in `clear()`. 180-day SLA.
-- **SF-027 (Low, risk 8):** Document accepted risk or add atomic flag. 180-day SLA. Mitigated by SA_RESETHAND.
-- **SF-026 (Low, risk 5):** Informational only. No action required.
-- **SF-028 (Low, risk 5):** Informational only. Optional cleanup.
+**Phase 15 action summary:**
+- **SF-030 (Low, risk 12):** Resolved. Parameter changed from by-value slice to pointer type, eliminating dangling pointer in `keywordProvider`. No GitLab issue per Low-findings policy.
+- **SF-029 (Info, risk 3):** Resolved. Added `replaceNewlinesForDisplay()` helper in search.zig to replace `\n` with space in display buffer. 6 unit tests added.
+- **SF-027 (Low, risk 8):** Document accepted risk or add atomic flag. 180-day SLA. Mitigated by SA_RESETHAND. No change from Phase 13.
+- **SF-026 (Low, risk 5):** Informational only. No action required. No change from Phase 13.
+- **SF-028 (Low, risk 5):** Informational only. Optional cleanup. No change from Phase 13.
+
+**Previously open findings now resolved:**
+- SF-030 (Low, risk 12): Resolved (Phase 15) -- parameter changed to pointer type, eliminating dangling pointer in `keywordProvider`.
+- SF-029 (Info, risk 3): Resolved (Phase 15) -- added `replaceNewlinesForDisplay()` helper in search.zig.
+- SF-025 (Medium, risk 35): Resolved -- signal handler updated to `std.posix.system.*`.
+- SF-024 (Low, risk 8): Resolved -- `chmod(0o600)` added after `createFile` in `clear()`.
 
 **No credentials, secrets, or actively exploitable remote vulnerabilities were found.**
 
 ---
 
-*Last updated: 2026-03-24 (Phase 13 -- 5 new findings SF-024 through SF-028; 28 total SF-IDs; 5 open [1 Medium, 4 Low]; 18 resolved; 3 won't do; 1 no action; GitLab issue created for SF-025)*
+*Last updated: 2026-03-25 (Phase 15 closure -- SF-029, SF-030 resolved; 30 total SF-IDs; 3 open [3 Low]; 23 resolved; 3 won't do; 1 no action; no new GitLab issues)*
