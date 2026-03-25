@@ -79,7 +79,7 @@ pub fn handleSearch(state: *core.ReplState) !void {
 
         // Find in history (after processing all bytes in this read batch)
         var found = false;
-        if (state.history.searchBackward(state.search_buffer.items, null)) |result| {
+        if (state.history.searchBackward(state.search_buffer.items, state.history_index)) |result| {
             state.buffer.clearRetainingCapacity();
             try appendHistoryFiltered(&state.buffer, state.allocator, result.entry);
             state.cursor = state.buffer.items.len;

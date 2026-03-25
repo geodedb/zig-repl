@@ -20,6 +20,9 @@ pub const MAX_FILE_CANDIDATES = 256;
 /// Context for tracking completion state during tab cycling.
 pub const CompletionContext = struct {
     allocator: std.mem.Allocator,
+    /// Arena for candidate strings and prefix — reset in O(1) instead of
+    /// freeing each string individually (PF-011).
+    arena: std.heap.ArenaAllocator,
     candidates: std.ArrayList([]const u8),
     current_index: usize = 0,
     /// The original prefix before completion started
@@ -33,39 +36,31 @@ pub const CompletionContext = struct {
     pub fn init(allocator: std.mem.Allocator) CompletionContext {
         return .{
             .allocator = allocator,
+            .arena = std.heap.ArenaAllocator.init(allocator),
             .candidates = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable, // Safe: initCapacity(0) never allocates
         };
     }
 
     /// Free all allocated candidates and the stored prefix.
     pub fn deinit(self: *CompletionContext) void {
-        for (self.candidates.items) |candidate| {
-            self.allocator.free(candidate);
-        }
+        self.arena.deinit();
         self.candidates.deinit(self.allocator);
-        if (self.original_prefix.len > 0) {
-            self.allocator.free(self.original_prefix);
-        }
     }
 
     /// Reset completion state (called when buffer content changes).
     pub fn reset(self: *CompletionContext) void {
-        for (self.candidates.items) |candidate| {
-            self.allocator.free(candidate);
-        }
+        // Free all arena-allocated strings in one shot.
+        _ = self.arena.reset(.retain_capacity);
         self.candidates.clearRetainingCapacity();
         self.current_index = 0;
-        if (self.original_prefix.len > 0) {
-            self.allocator.free(self.original_prefix);
-            self.original_prefix = "";
-        }
+        self.original_prefix = "";
         self.word_start = 0;
         self.active = false;
     }
 
     /// Add a candidate to the completion list.
     pub fn addCandidate(self: *CompletionContext, candidate: []const u8) !void {
-        const dup = try self.allocator.dupe(u8, candidate);
+        const dup = try self.arena.allocator().dupe(u8, candidate);
         try self.candidates.append(self.allocator, dup);
     }
 

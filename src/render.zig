@@ -14,39 +14,27 @@ pub fn tabWidth(col: usize) usize {
     return TAB_STOP - (col % TAB_STOP);
 }
 
-/// Calculate number of visual lines accounting for terminal width.
-pub fn calculateVisualLines(prompt_len: usize, buffer: []const u8, term_width: usize) usize {
-    if (term_width == 0) return 1;
+/// Cursor position relative to the end of the buffer content.
+pub const CursorPosition = struct {
+    rows_from_end: usize,
+    col: usize,
+};
 
-    var lines: usize = 0;
-    var col: usize = prompt_len;
+/// Combined render information from a single buffer scan.
+pub const RenderInfo = struct {
+    visual_lines: usize,
+    cursor_pos: CursorPosition,
+};
 
-    for (buffer) |c| {
-        if (c == '\n') {
-            lines += 1;
-            col = 0;
-        } else if (c == '\t') {
-            const width = tabWidth(col);
-            col += width;
-            if (col >= term_width) {
-                lines += 1;
-                col = 0;
-            }
-        } else {
-            col += 1;
-            if (col >= term_width) {
-                lines += 1;
-                col = 0;
-            }
-        }
-    }
-
-    return lines;
-}
-
-/// Calculate cursor position accounting for wraps.
-pub fn calculateCursorPosition(prompt_len: usize, buffer: []const u8, cursor: usize, term_width: usize) struct { rows_from_end: usize, col: usize } {
-    if (term_width == 0) return .{ .rows_from_end = 0, .col = cursor + prompt_len };
+/// Calculate both visual line count and cursor position in a single pass over
+/// the buffer. This avoids the redundant dual-scan that previously occurred
+/// when `calculateVisualLines` and `calculateCursorPosition` each iterated
+/// the entire buffer independently (PF-009).
+pub fn calculateRenderInfo(prompt_len: usize, buffer: []const u8, cursor: usize, term_width: usize) RenderInfo {
+    if (term_width == 0) return .{
+        .visual_lines = 1,
+        .cursor_pos = .{ .rows_from_end = 0, .col = cursor + prompt_len },
+    };
 
     var total_lines: usize = 0;
     var cursor_line: usize = 0;
@@ -86,9 +74,28 @@ pub fn calculateCursorPosition(prompt_len: usize, buffer: []const u8, cursor: us
     }
 
     return .{
-        .rows_from_end = total_lines - cursor_line,
-        .col = cursor_col,
+        .visual_lines = total_lines,
+        .cursor_pos = .{
+            .rows_from_end = total_lines - cursor_line,
+            .col = cursor_col,
+        },
     };
+}
+
+/// Calculate number of visual lines accounting for terminal width.
+///
+/// Thin wrapper around `calculateRenderInfo` for callers that only need
+/// the visual line count. Cursor is set to 0 (unused for line counting).
+pub fn calculateVisualLines(prompt_len: usize, buffer: []const u8, term_width: usize) usize {
+    return calculateRenderInfo(prompt_len, buffer, 0, term_width).visual_lines;
+}
+
+/// Calculate cursor position accounting for wraps.
+///
+/// Thin wrapper around `calculateRenderInfo` for callers that only need
+/// cursor positioning.
+pub fn calculateCursorPosition(prompt_len: usize, buffer: []const u8, cursor: usize, term_width: usize) CursorPosition {
+    return calculateRenderInfo(prompt_len, buffer, cursor, term_width).cursor_pos;
 }
 
 // =============================================================================

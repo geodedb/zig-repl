@@ -23,7 +23,7 @@ pub const KeyEvent = struct {
 /// from printable characters and control-character combos.
 ///
 /// Safety: each value is a low control byte whose raw form (if typed
-/// directly) would be mapped by the control-character handler at line 90
+/// directly) would be mapped by the control-character handler in parseKeyEvent
 /// to `{ .key = byte + 'a' - 1, .ctrl = true }`, producing a *different*
 /// KeyEvent. Therefore these codes cannot collide with Ctrl+letter combos.
 pub const SyntheticKey = struct {

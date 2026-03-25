@@ -309,13 +309,14 @@ fn renderPrompt(state: *ReplState) !void {
         };
     };
 
-    // Calculate visual lines
-    const current_visual_lines = render.calculateVisualLines(prompt.len, state.buffer.items, term_width);
+    // Single-pass calculation of visual lines and cursor position (PF-009).
+    const render_info = render.calculateRenderInfo(prompt.len, state.buffer.items, state.cursor, term_width);
+    const current_visual_lines = render_info.visual_lines;
 
     // Position cursor -- only if the buffer has not overflowed, since writing
     // partial ANSI escape sequences would corrupt the terminal.
     if (!buffer_full) {
-        const cursor_pos = render.calculateCursorPosition(prompt.len, state.buffer.items, state.cursor, term_width);
+        const cursor_pos = render_info.cursor_pos;
 
         if (cursor_pos.rows_from_end > 0) {
             std.fmt.format(w, "\x1b[{d}A", .{cursor_pos.rows_from_end}) catch {
@@ -812,7 +813,7 @@ fn handleCompletion(state: *ReplState) void {
 
         // Save original prefix
         if (prefix.len > 0) {
-            ctx.original_prefix = state.allocator.dupe(u8, prefix) catch return;
+            ctx.original_prefix = ctx.arena.allocator().dupe(u8, prefix) catch return;
         }
 
         // Call user's completion function to populate candidates

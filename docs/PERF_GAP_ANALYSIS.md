@@ -1,8 +1,8 @@
 # Performance Gap Analysis -- devnw/zig/repl
 
 **Project:** gitlab.com/devnw/zig/repl
-**Last updated:** 2026-03-25 (Phase 14 -- Gap Closure: PF-004 resolved; persistent file handle for history append)
-**Audit phase:** Phase 14 (Gap Closure) -- PF-004 resolved; syscalls reduced from 6 to 2 per append; overall posture confirmed Strong/Production-Ready
+**Last updated:** 2026-03-25 (Phase 15 -- Gap Closure: 8 resolved, 6 won't-do; PF-009, PF-011, PF-021, PF-022, PF-026, PF-032, PF-036, PF-040 resolved)
+**Audit phase:** Phase 15 (Gap Closure) -- 8 items resolved (single-pass render, arena allocator, SIGWINCH+cached width, O(n) dedup, search resume, writev, CI summary); 6 won't-do (sub-µs optimizations not worth complexity)
 **Methodology:** Static code analysis with PerfScore framework
 
 ---
@@ -11,24 +11,24 @@
 
 ### Severity Distribution
 
-| Severity | Open | Resolved | Total | Description |
-|----------|------|----------|-------|-------------|
-| P0       | 0    | 1        | 1     | SLO breach / outage risk -- immediate action |
-| P1       | 0    | 3        | 3     | Material user-facing impact -- within sprint |
-| P2       | 0    | 6        | 6     | Moderate impact / cost -- next quarter |
-| P3       | 6    | 7        | 13    | Minor optimization -- backlog |
-| Info     | 15   | 2        | 17    | Hardening / best practice -- as capacity allows |
-| **Total**| **21** | **19** | **40** | |
+| Severity | Open | Resolved | Won't Do | Total | Description |
+|----------|------|----------|----------|-------|-------------|
+| P0       | 0    | 1        | 0        | 1     | SLO breach / outage risk -- immediate action |
+| P1       | 0    | 3        | 0        | 3     | Material user-facing impact -- within sprint |
+| P2       | 0    | 6        | 0        | 6     | Moderate impact / cost -- next quarter |
+| P3       | 1    | 12       | 0        | 13    | Minor optimization -- backlog |
+| Info     | 6    | 5        | 6        | 17    | Hardening / best practice -- as capacity allows |
+| **Total**| **7** | **27** | **6** | **40** | |
 
-**Progress since Phase 14 (Gap Closure):** PF-004 resolved -- persistent `append_handle` file handle added to history.zig; lazily opened on first append, reused for all subsequent appends; closed in deinit() and reset in clear(). Syscalls reduced from 6 to 2 per append (write+write vs open+write+write+chmod+close+fsync). 3 tests added. GitLab issue #66 closed. 19 of 40 total findings resolved. 21 open (0 P2, 6 P3, 15 Info). Overall performance posture confirmed Strong/Production-Ready for interactive REPL use. Keystroke-to-render latency ~5-20us (500-2000x below human perception threshold of ~10ms).
+**Progress since Phase 15 (Gap Closure):** 8 items resolved: PF-009 (single-pass calculateRenderInfo in render.zig, used by core.zig), PF-011 (arena allocator for completion candidates), PF-021+PF-040 (SIGWINCH handler + cached terminal width in platform.zig), PF-022 (O(n) compacting dedup pass in history.zig), PF-026 (search resume from history_index in search.zig), PF-032 (writev for history append), PF-036 (CI --summary all). 6 items marked Won't Do: PF-025 (in-memory fixedBufferStream writes, sub-µs), PF-031 (would add real error paths for sub-µs gain), PF-033 (init-only shouldUseColor, not per-keystroke), PF-034 (stdlib readToEndAlloc already optimizes), PF-038 (snapshot must precede handleKey), PF-039 (correct LIFO semantics, L1-cache data). 27 of 40 total findings resolved, 6 won't do, 7 open (1 P3, 6 Info). Overall performance posture Strong/Production-Ready.
 
-### Top 5 Open Risks by Expected Impact
+### Top Open Risks by Expected Impact
 
-1. **PF-021 (P3, Score 25):** getTerminalWidth() issues ioctl syscall on every renderPrompt call. Cache the value and update via SIGWINCH handler. PF-040 is a prerequisite enabler.
-2. **PF-010 (P3, Score 25):** orderedRemove(0) on history append overflow. Use ring buffer or swap-remove with sort.
-3. **PF-011 (P3, Score 24):** Per-candidate alloc/free churn in completion. 256 alloc/free at ~25-50us total, once per Tab press. Use arena allocator for completion cycle. Rescored 30->24: Impact 3 x Likelihood 2 x 4.
-4. **PF-009 (P3, Score 20):** Redundant buffer scan (calculateVisualLines + calculateCursorPosition). Rescored from 30 to 20 -- dual scan adds ~40-160ns, <1% of keystroke latency. Still worthwhile as a single-pass merge in render.zig.
-5. **PF-022 (P3, Score 20):** Global dedup orderedRemove(i) in while loop O(k*n). Use hash set for O(1) lookup.
+1. **PF-010 (P3, Score 25):** orderedRemove(0) on history append overflow. Use ring buffer or swap-remove with sort. Only remaining P3.
+2. **PF-014 (Info):** Full history file read into memory. Bounded by 64MB check; adequate for interactive use.
+3. **PF-023 (Info):** handleSearch stdout writes. 1 syscall/keystroke; not a bottleneck.
+4. **PF-029 (Info):** appendToMultiLine no pre-allocate. Minor; no measurable impact.
+5. **PF-030 (Info):** search_buffer starts at capacity 0. Few reallocs for short queries.
 
 ---
 
@@ -41,13 +41,13 @@
 | ~~1~~ | PF-004 | P2 | 48 | File open/close per history append (no persistent handle) | history.zig | `createFile` on every `append()` call; 6 syscalls per line added (open+write+write+chmod+close+fsync; chmod added by SF-024 security fix). Runs once per Enter key, not per keystroke. Rescored 55->48: Impact 4 x Likelihood 3 x 4 | [#66](https://gitlab.com/devnw/zig/repl/-/issues/66) | Added `append_handle: ?std.fs.File` field; lazily opened on first append, reused for all subsequent appends; closed in deinit() and reset in clear(). syscalls reduced from 6 to 2 per append. 3 tests added | Resolved |
 | ~~2~~ | PF-017 | P2 | 40 | Paste buffer 4096 silent truncation | core.zig | `if (paste_collect_len < paste_collect_buf.len)` silently drops chars | -- | Flush-and-continue: when paste buffer is full, flush to edit buffer and reset | Resolved |
 | ~~3~~ | PF-019 | P3 | 30 | Render buffer 8192 silent truncation | core.zig | `var render_buf: [8192]u8 = undefined` with `catch {}` overflow | -- | buffer_full flag stops writes on overflow; cursor positioning skipped to avoid broken ANSI | Resolved |
-| 4 | PF-021 | P3 | 25 | getTerminalWidth() ioctl syscall on every renderPrompt | platform.zig:229, core.zig:252 | `platform.getTerminalWidth()` calls `ioctl(STDOUT_FILENO, TIOCGWINSZ)` per render; 1 syscall per keystroke | -- | Cache terminal width at init; install SIGWINCH handler to invalidate cache | Deferred |
+| ~~4~~ | PF-021 | P3 | 25 | getTerminalWidth() ioctl syscall on every renderPrompt | platform.zig | `platform.getTerminalWidth()` calls `ioctl(STDOUT_FILENO, TIOCGWINSZ)` per render; 1 syscall per keystroke | -- | Added SIGWINCH handler (PF-040) + cached terminal width; `terminal_resized` flag invalidates cache on resize; getTerminalWidth() returns cached value when valid | Resolved |
 | 5 | PF-010 | P3 | 25 | orderedRemove(0) on history append overflow | history.zig | `orderedRemove(0)` when entries exceed max; O(n) per append at capacity | [#69](https://gitlab.com/devnw/zig/repl/-/issues/69) | Use ring buffer or swap-remove with sort | Deferred |
-| 6 | PF-011 | P3 | 24 | Per-candidate alloc/free churn in completion | completion.zig | `allocator.dupe()` per candidate in addCandidate; 1 alloc per candidate, up to 256 alloc/free at ~25-50us total; runs once per Tab press. Rescored 30->24: Impact 3 x Likelihood 2 x 4 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Use arena allocator for completion cycle | Deferred |
-| 7 | PF-022 | P3 | 20 | Global dedup orderedRemove(i) in while loop O(k*n) | history.zig:136-145 | `orderedRemove(i)` inside `while (i < self.entries.items.len)` loop when `deduplicate_global` is true; O(k*n) where k=duplicates, n=entries | -- | Use a hash set for O(1) lookup, or swap-remove + re-sort to avoid O(n) shift per removal | Deferred |
-| 8 | PF-009 | P3 | 20 | Redundant buffer scan (calculateVisualLines + calculateCursorPosition) | render.zig | Both functions iterate entire buffer independently; 2x full buffer scan per render. Rescored 30->20: adds ~40-160ns for typical lines, <1% of keystroke latency | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Merge into single pass returning both values; now in render.zig for future work | Deferred |
-| 9 | PF-026 | P3 | 15 | History search re-scans all entries per keystroke | search.zig:57, history.zig:236-239 | `searchBackward()` called at search.zig:57 with `null` start_index, causing full re-scan from end on every keystroke (history.zig:237 falls through to `self.entries.items.len`). Fix: pass `state.history_index` as start_index to resume from last match position | -- | Pass `state.history_index` instead of `null` to `searchBackward()` at search.zig:57; cache and resume from last match position | Deferred |
-| 10 | PF-025 | Info | -- | Byte-by-byte writeAll to fixedBufferStream in render loop | core.zig:273-288 | `w.writeAll(&[_]u8{c})` in per-character loop; targets in-memory fixedBufferStream, not file descriptor. Per-byte overhead ~2-5ns function-call cost; ~200-500ns total for 100-char line. Reclassified P3->Info: not an I/O problem | -- | Batch write contiguous printable runs; only break for control character substitutions | Deferred |
+| ~~6~~ | PF-011 | P3 | 24 | Per-candidate alloc/free churn in completion | completion.zig | `allocator.dupe()` per candidate in addCandidate; 1 alloc per candidate, up to 256 alloc/free at ~25-50us total; runs once per Tab press | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Added `arena: std.heap.ArenaAllocator` to CompletionContext; `addCandidate` uses arena allocator; `reset()` uses `arena.reset(.retain_capacity)` — O(1) instead of N frees | Resolved |
+| ~~7~~ | PF-022 | P3 | 20 | Global dedup orderedRemove(i) in while loop O(k*n) | history.zig | `orderedRemove(i)` inside `while` loop when `deduplicate_global` is true; O(k*n) where k=duplicates, n=entries | -- | Replaced with O(n) single-pass compacting: forward scan with write_idx, free duplicates in-place, shrinkRetainingCapacity at end | Resolved |
+| ~~8~~ | PF-009 | P3 | 20 | Redundant buffer scan (calculateVisualLines + calculateCursorPosition) | render.zig | Both functions iterate entire buffer independently; 2x full buffer scan per render | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Added `calculateRenderInfo()` single-pass function; core.zig renderPrompt now calls it once instead of two separate functions | Resolved |
+| ~~9~~ | PF-026 | P3 | 15 | History search re-scans all entries per keystroke | search.zig:82, history.zig | `searchBackward()` called with `null` start_index, causing full re-scan from end on every keystroke | -- | Changed `null` to `state.history_index` at search.zig:82; search resumes from last match position | Resolved |
+| ~~10~~ | PF-025 | Info | -- | Byte-by-byte writeAll to fixedBufferStream in render loop | core.zig | `w.writeAll(&[_]u8{c})` in per-character loop; targets in-memory fixedBufferStream. Per-byte overhead ~2-5ns; ~200-500ns total for 100-char line. Not an I/O problem | -- | Won't Do -- in-memory fixedBufferStream writes are sub-microsecond; batching adds complexity for negligible gain | Won't Do |
 | ~~11~~ | PF-028 | P3 | 25 | History load() dupes all lines then frees excess beyond max_entries | history.zig:88-109 | `allocator.dupe(u8, line)` for every line, then frees excess entries when count > max_entries; 10k-line file = 10k allocs + 5k frees | -- | Two-pass approach: count lines first, skip `total - max_entries` before allocating | Resolved |
 | ~~12~~ | PF-027 | P3 | 20 | History ArrayList no preallocation during load() | history.zig:43,88-94 | `initCapacity(allocator, 0)` at line 43; `append` in loop at lines 89-94 causes ~13 reallocs for 5000 entries (geometric growth) | -- | Added `ensureTotalCapacity(min(file_size / 40, max_entries))` before load loop | Resolved |
 | ~~13~~ | PF-035 | P3 | 20 | apt-get install runs in every CI job (~2-3.5min aggregate overhead) | .gitlab-ci.yml:49 | `apt-get update && apt-get install -y curl xz-utils` in `.install-zig` anchor; runs in every job using the anchor | -- | Moved apt-get inside cache guard with `command -v` check; runs only when needed | Resolved |
@@ -56,15 +56,15 @@
 | 16 | PF-023 | Info | -- | handleSearch() direct stdout writes (1 syscall/keystroke + 1 on search entry) | core.zig:747,795 | `stdout.writeAll` at line 747 runs once on search entry (not per keystroke); line 795 writes search result display once per keystroke. Actual per-keystroke cost is 1 unbuffered write, not 2 | -- | Buffer search output into a stack buffer and flush once per keystroke | Deferred |
 | 17 | PF-029 | Info | -- | appendToMultiLine no pre-allocate for continuation buffer | core.zig:478-486 | `appendSlice` without prior `ensureTotalCapacity`; each continuation triggers potential reallocs in multi_line_buffer | -- | Pre-allocate with `ensureTotalCapacity(input.len + 1)` before append | Deferred |
 | 18 | PF-030 | Info | -- | search_buffer starts at capacity 0 | core.zig:181 | `initCapacity(opts.allocator, 0)` for search_buffer; every search keystroke triggers realloc growth | -- | Pre-allocate 64-128 bytes at init (typical search queries are short) | Deferred |
-| 19 | PF-031 | Info | -- | ReplState buffers (buffer, kill_ring, multi_line_buffer) start at capacity 0 | core.zig:172-184 | All four ArrayList fields initialized with `initCapacity(allocator, 0)`; first use triggers realloc | -- | Pre-allocate reasonable defaults: buffer=256, kill_ring=128, multi_line_buffer=256, search_buffer=64 | Deferred |
-| 20 | PF-032 | Info | -- | Two writeAll syscalls in history append | history.zig:179-180 | `file.writeAll(line)` then `file.writeAll("\n")` -- two separate syscalls per history append | -- | Concatenate line + newline into single buffer before write, or use writev/iovec | Deferred |
-| 21 | PF-033 | Info | -- | shouldUseColor() calls 2 getenv + 1 isatty per TerminalWriter init | platform.zig:269-283,357 | `getenv("NO_COLOR")`, `getenv("TERM")`, `isStdoutTty()` called in `shouldUseColor()` which is called in every `TerminalWriter.init()` | -- | Cache result in module-level `var` on first call; environment does not change during process lifetime | Deferred |
-| 22 | PF-034 | Info | -- | Config.loadFromFile no pre-size-check for readToEndAlloc | config.zig:109 | `file.readToEndAlloc(allocator, 1024 * 1024)` reads without checking file size first; may over-allocate for small config files | -- | Call `file.getEndPos()` first and allocate exact size, or use smaller initial max (e.g. 64KB for config) | Deferred |
-| 23 | PF-036 | Info | -- | Build job missing --summary all flag for test output | .gitlab-ci.yml:92 | `zig build` without `--summary all`; no build summary in CI logs for diagnosing slow compilation | -- | Add `--summary all` to build command for visibility into compilation steps | Deferred |
-| 24 | PF-038 | Info | -- | Undo pre-snapshot alloc+free on non-destructive keypresses | core.zig:371,393-394 | `allocator.dupe()` runs on every keypress; freed immediately at line 394 for non-destructive actions (~15-40% of keypresses). Cost ~100-300ns per wasted cycle; terminal I/O syscalls are 100-1000x more expensive | -- | Conditional dupe (only allocate after action is classified as destructive). Not worth the complexity -- adds a second keymap dispatch or deferred snapshot pattern for sub-microsecond gain | Deferred |
-| 25 | PF-039 | Info | -- | UndoStack orderedRemove(0) at capacity | undo.zig:57,75 | `orderedRemove(0)` shifts up to 99 entries (~2.4KB) when stack is full; ~100-200ns per destructive keypress. L1-cache-resident data, 50-100x cheaper than any syscall | -- | Replace with ring buffer (write index wraps around). Low priority -- data fits in L1 cache and cost is negligible vs. terminal I/O | Deferred |
-| 26 | PF-040 | Info | -- | No SIGWINCH handler (enabler for PF-021) | platform.zig:242-258 | Signal infrastructure exists for SIGTERM/SIGHUP but SIGWINCH is not registered. Prerequisite for PF-021 (terminal width caching via SIGWINCH invalidation). No standalone performance impact | -- | Register SIGWINCH handler alongside existing SIGTERM/SIGHUP handlers; set a flag that getTerminalWidth() checks to refresh cached value. Implement when PF-021 is addressed | Deferred |
-| 27 | PF-042 | Info | -- | generateFilePathCandidates sorts all candidates after directory iteration | completion.zig:270-276 | `std.mem.sort` on up to 256 candidates (MAX_FILE_CANDIDATES) after directory iteration; O(n log n) where n<=256; single-digit microseconds; runs once per Tab press | -- | No action warranted. O(n log n) on <=256 items is negligible (~1-5us). Sort provides consistent user-facing ordering | Deferred |
+| ~~19~~ | PF-031 | Info | -- | ReplState buffers start at capacity 0 | core.zig | All ArrayList fields initialized with `initCapacity(allocator, 0)`; first use triggers realloc | -- | Won't Do -- pre-allocating would change `initCapacity(allocator, 0) catch unreachable` to fallible paths for sub-µs first-use realloc gain | Won't Do |
+| ~~20~~ | PF-032 | Info | -- | Two writeAll syscalls in history append | history.zig | `file.writeAll(line)` then `file.writeAll("\n")` -- two separate syscalls per history append | -- | Combined into single `writev` syscall using iovec array: `[line, "\n"]` | Resolved |
+| ~~21~~ | PF-033 | Info | -- | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter init | platform.zig | `getenv("NO_COLOR")`, `getenv("TERM")`, `isStdoutTty()` called in `shouldUseColor()` | -- | Won't Do -- shouldUseColor is called during TerminalWriter.init() (once at startup), not per-keystroke; caching adds complexity for zero runtime benefit | Won't Do |
+| ~~22~~ | PF-034 | Info | -- | Config.loadFromFile no pre-size-check for readToEndAlloc | config.zig | `file.readToEndAlloc(allocator, 1024 * 1024)` reads without checking file size first | -- | Won't Do -- stdlib `readToEndAlloc` already handles internal buffering and allocation; pre-checking adds a syscall for negligible memory savings on small config files | Won't Do |
+| ~~23~~ | PF-036 | Info | -- | Build job missing --summary all flag | .gitlab-ci.yml | `zig build` without `--summary all`; no build summary in CI logs | -- | Added `--summary all` to build command at .gitlab-ci.yml:93 | Resolved |
+| ~~24~~ | PF-038 | Info | -- | Undo pre-snapshot alloc+free on non-destructive keypresses | core.zig | `allocator.dupe()` runs on every keypress; freed immediately for non-destructive actions. Cost ~100-300ns per wasted cycle | -- | Won't Do -- snapshot must precede handleKey which modifies buffer directly; conditional dupe would require two keymap dispatches or deferred snapshot for sub-µs gain | Won't Do |
+| ~~25~~ | PF-039 | Info | -- | UndoStack orderedRemove(0) at capacity | undo.zig | `orderedRemove(0)` shifts up to 99 entries (~2.4KB) when stack is full; ~100-200ns. L1-cache-resident | -- | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data is 50-100x cheaper than any syscall | Won't Do |
+| ~~26~~ | PF-040 | Info | -- | No SIGWINCH handler (enabler for PF-021) | platform.zig | Signal infrastructure existed for SIGTERM/SIGHUP but SIGWINCH was not registered | -- | Registered SIGWINCH handler in installTerminalSignalHandlers; sets `terminal_resized` flag; removed in removeTerminalSignalHandlers | Resolved |
+| 27 | PF-042 | Info | -- | generateFilePathCandidates sorts <=256 candidates | completion.zig | `std.mem.sort` on up to 256 candidates; O(n log n) where n<=256; ~1-5µs; runs once per Tab press | -- | No action warranted. Sort provides consistent user-facing ordering | Deferred |
 | ~~28~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
 
 ### Resolved Findings
@@ -87,6 +87,25 @@
 | PF-017 | P2 | 40 | Paste buffer 4096 silent truncation | core.zig | Flush-and-continue: when paste buffer fills, flush to edit buffer via sanitizePasteContent + insertSlice, reset, continue collecting. Handles arbitrarily large pastes without dynamic allocation. | Phase 9 |
 | PF-019 | P3 | 30 | Render buffer 8192 silent truncation | core.zig | Replaced `catch {}` with `buffer_full` flag. Writes stop on overflow; cursor positioning skipped to prevent broken ANSI sequences. Valid partial content still written. | Phase 9 |
 | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Phase 8 |
+| PF-009 | P3 | 20 | Redundant buffer scan (calculateVisualLines + calculateCursorPosition) | render.zig, core.zig | Added `calculateRenderInfo()` single-pass function returning `RenderInfo{visual_lines, cursor_pos}`; core.zig renderPrompt uses single call instead of two separate functions | Phase 15 (Gap Closure) |
+| PF-011 | P3 | 24 | Per-candidate alloc/free churn in completion | completion.zig, core.zig | Added `arena: std.heap.ArenaAllocator` to CompletionContext; `addCandidate` uses arena; `reset()` uses `arena.reset(.retain_capacity)` — O(1) instead of N frees | Phase 15 (Gap Closure) |
+| PF-021 | P3 | 25 | getTerminalWidth() ioctl syscall on every renderPrompt | platform.zig | Cached terminal width with SIGWINCH invalidation; `terminal_resized` flag set by signal handler; getTerminalWidth() returns cached value when valid | Phase 15 (Gap Closure) |
+| PF-022 | P3 | 20 | Global dedup orderedRemove(i) in while loop O(k*n) | history.zig | Replaced with O(n) single-pass compacting: forward scan with write_idx, free duplicates in-place, shrinkRetainingCapacity | Phase 15 (Gap Closure) |
+| PF-026 | P3 | 15 | History search re-scans all entries per keystroke | search.zig | Changed `null` to `state.history_index` in searchBackward call; search resumes from last match position | Phase 15 (Gap Closure) |
+| PF-032 | Info | -- | Two writeAll syscalls in history append | history.zig | Combined into single `writev` syscall using iovec array | Phase 15 (Gap Closure) |
+| PF-036 | Info | -- | Build job missing --summary all flag | .gitlab-ci.yml | Added `--summary all` to build command | Phase 15 (Gap Closure) |
+| PF-040 | Info | -- | No SIGWINCH handler (enabler for PF-021) | platform.zig | Registered SIGWINCH handler in installTerminalSignalHandlers; sets `terminal_resized` flag; removed in removeTerminalSignalHandlers | Phase 15 (Gap Closure) |
+
+### Won't Do
+
+| PF-ID | Severity | Finding | Reason |
+|-------|----------|---------|--------|
+| PF-025 | Info | Byte-by-byte writeAll to fixedBufferStream in render loop | Won't Do -- in-memory fixedBufferStream writes are sub-microsecond (~200-500ns for 100-char line); batching adds complexity for negligible gain |
+| PF-031 | Info | ReplState buffers start at capacity 0 | Won't Do -- pre-allocating would change `initCapacity(allocator, 0) catch unreachable` to fallible paths; sub-µs first-use realloc cost |
+| PF-033 | Info | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter init | Won't Do -- called once at TerminalWriter.init() (startup), not per-keystroke; caching adds complexity for zero runtime benefit |
+| PF-034 | Info | Config.loadFromFile no pre-size-check for readToEndAlloc | Won't Do -- stdlib `readToEndAlloc` already handles internal buffering; pre-checking adds a syscall for negligible memory savings on small configs |
+| PF-038 | Info | Undo pre-snapshot alloc+free on non-destructive keypresses | Won't Do -- snapshot must precede handleKey which modifies buffer directly; conditional dupe requires two keymap dispatches for sub-µs gain |
+| PF-039 | Info | UndoStack orderedRemove(0) at capacity | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data (~2.4KB) is 50-100x cheaper than any syscall |
 
 ---
 
@@ -108,14 +127,14 @@
 | PF-017 | P2 | 40 | core.zig | Paste buffer 4096 silent truncation | Resolved |
 | PF-008 | P3 | 35 | core.zig | orderedRemove in word deletion loop | Resolved |
 | PF-018 | P3 | 35 | core.zig | appendHistoryFiltered per-byte append | Resolved |
-| PF-009 | P3 | 20 | render.zig | Redundant dual buffer scan (rescored 30->20) | Deferred |
-| PF-011 | P3 | 24 | completion.zig | Per-candidate allocation churn (rescored 30->24) | Deferred |
+| PF-009 | P3 | 20 | render.zig | Redundant dual buffer scan (rescored 30->20) | Resolved |
+| PF-011 | P3 | 24 | completion.zig | Per-candidate allocation churn (rescored 30->24) | Resolved |
 | PF-019 | P3 | 30 | core.zig | Render buffer 8192 silent truncation | Resolved |
-| PF-021 | P3 | 25 | platform.zig, core.zig | getTerminalWidth() ioctl per renderPrompt | Deferred |
+| PF-021 | P3 | 25 | platform.zig, core.zig | getTerminalWidth() ioctl per renderPrompt | Resolved |
 | PF-010 | P3 | 25 | history.zig | orderedRemove(0) on append overflow | Deferred |
-| PF-022 | P3 | 20 | history.zig | Global dedup orderedRemove in while loop O(k*n) | Deferred |
-| PF-025 | Info | -- | core.zig | Byte-by-byte writeAll to fixedBufferStream (reclassified P3->Info) | Deferred |
-| PF-026 | P3 | 15 | search.zig, history.zig | History search re-scans all entries per keystroke (null start_index at search.zig:57) | Deferred |
+| PF-022 | P3 | 20 | history.zig | Global dedup orderedRemove in while loop O(k*n) | Resolved |
+| PF-025 | Info | -- | core.zig | Byte-by-byte writeAll to fixedBufferStream (reclassified P3->Info) | Won't Do |
+| PF-026 | P3 | 15 | search.zig, history.zig | History search re-scans from history_index | Resolved |
 | PF-020 | P3 | 15 | core.zig | reverse_tab orderedRemove x4 | Resolved |
 | PF-028 | P3 | 25 | history.zig | History load() dupes all lines then frees excess | Resolved |
 | PF-027 | P3 | 20 | history.zig | History ArrayList no preallocation during load() | Resolved |
@@ -123,13 +142,13 @@
 | PF-023 | Info | -- | core.zig | handleSearch() direct stdout writes (1 syscall/keystroke + 1 on entry) | Deferred |
 | PF-029 | Info | -- | core.zig | appendToMultiLine no pre-allocate | Deferred |
 | PF-030 | Info | -- | core.zig | search_buffer starts at capacity 0 | Deferred |
-| PF-031 | Info | -- | core.zig | ReplState buffers start at capacity 0 | Deferred |
-| PF-032 | Info | -- | history.zig | Two writeAll syscalls in history append | Deferred |
-| PF-033 | Info | -- | platform.zig | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter | Deferred |
-| PF-034 | Info | -- | config.zig | Config.loadFromFile no pre-size-check | Deferred |
-| PF-038 | Info | -- | core.zig | Undo pre-snapshot alloc+free on non-destructive keypresses | Deferred |
-| PF-039 | Info | -- | undo.zig | UndoStack orderedRemove(0) at capacity | Deferred |
-| PF-040 | Info | -- | platform.zig | No SIGWINCH handler (enabler for PF-021) | Deferred |
+| PF-031 | Info | -- | core.zig | ReplState buffers start at capacity 0 | Won't Do |
+| PF-032 | Info | -- | history.zig | Two writeAll syscalls in history append | Resolved |
+| PF-033 | Info | -- | platform.zig | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter | Won't Do |
+| PF-034 | Info | -- | config.zig | Config.loadFromFile no pre-size-check | Won't Do |
+| PF-038 | Info | -- | core.zig | Undo pre-snapshot alloc+free on non-destructive keypresses | Won't Do |
+| PF-039 | Info | -- | undo.zig | UndoStack orderedRemove(0) at capacity | Won't Do |
+| PF-040 | Info | -- | platform.zig | SIGWINCH handler (enabler for PF-021) | Resolved |
 | PF-042 | Info | -- | completion.zig | generateFilePathCandidates sorts <=256 candidates (negligible) | Deferred |
 
 ### Infrastructure (`area::infra`)
@@ -140,7 +159,7 @@
 | PF-012 | Info | -- | .gitlab-ci.yml | No build/test CI stage | Resolved |
 | PF-013 | Info | -- | build.zig | No benchmark suite | Deferred |
 | PF-024 | Info | -- | .gitlab-ci.yml | CI re-downloads Zig on every job (no caching) | Resolved |
-| PF-036 | Info | -- | .gitlab-ci.yml | Build job missing --summary all flag | Deferred |
+| PF-036 | Info | -- | .gitlab-ci.yml | Build job missing --summary all flag | Resolved |
 
 ---
 
@@ -150,21 +169,21 @@
 
 | PF-ID | Score | Fix | Effort | Status |
 |-------|-------|-----|--------|--------|
-| PF-009 | 20 | Merge calculateVisualLines + calculateCursorPosition into single pass (now in render.zig). Rescored 30->20 | 1-2 hours | Deferred |
-| PF-021 | 25 | Cache terminal width in a module-level var; install SIGWINCH handler to invalidate | 2-3 hours | Deferred |
+| PF-009 | 20 | Merged into `calculateRenderInfo()` single-pass in render.zig; core.zig uses single call | 1-2 hours | Resolved |
+| PF-021 | 25 | Cached terminal width with SIGWINCH invalidation in platform.zig | 2-3 hours | Resolved |
 | PF-027 | 20 | Added `ensureTotalCapacity(min(file_size / 40, max_entries))` before history load loop | 30 min | Resolved |
 | PF-029 | -- | Pre-allocate multi_line_buffer with `ensureTotalCapacity(input.len + 1)` before append | 15 min | Deferred |
 | PF-025 | -- | Batch contiguous printable character runs into single writeAll calls in render loop (reclassified P3->Info) | 1-2 hours | Deferred |
-| PF-026 | 15 | Pass `state.history_index` instead of `null` to `searchBackward()` at search.zig:57; resume from last match position instead of full re-scan | 1-2 hours | Deferred |
+| PF-026 | 15 | Changed `null` to `state.history_index` in searchBackward call at search.zig:82 | 30 min | Resolved |
 | PF-042 | -- | No action warranted. O(n log n) sort on <=256 items at completion.zig:270-276 is ~1-5us per Tab press | -- | Deferred |
 | PF-030 | -- | Pre-allocate search_buffer with 64-128 bytes at init | 15 min | Deferred |
 | PF-031 | -- | Pre-allocate ReplState buffers with reasonable defaults (buffer=256, kill_ring=128, etc.) | 30 min | Deferred |
-| PF-032 | -- | Concatenate history line + newline into single write | 30 min | Deferred |
-| PF-033 | -- | Cache shouldUseColor() result in module-level var | 15 min | Deferred |
-| PF-034 | -- | Call getEndPos() before readToEndAlloc in Config.loadFromFile | 15 min | Deferred |
-| PF-039 | -- | UndoStack: ring buffer instead of orderedRemove(0). L1-cache-resident, negligible cost | 1-2 hours | Deferred |
-| PF-040 | -- | Register SIGWINCH handler alongside SIGTERM/SIGHUP. Enabler for PF-021 width caching | 1-2 hours | Deferred |
-| PF-036 | -- | Add `--summary all` to build command in .gitlab-ci.yml | 5 min | Deferred |
+| PF-032 | -- | Combined into single `writev` syscall using iovec array | 30 min | Resolved |
+| PF-033 | -- | shouldUseColor() is init-only, not per-keystroke | -- | Won't Do |
+| PF-034 | -- | stdlib readToEndAlloc already optimizes internally | -- | Won't Do |
+| PF-039 | -- | orderedRemove correct for LIFO undo; L1-cache data | -- | Won't Do |
+| PF-040 | -- | Registered SIGWINCH handler alongside SIGTERM/SIGHUP | 1-2 hours | Resolved |
+| PF-036 | -- | Added `--summary all` to build command in .gitlab-ci.yml | 5 min | Resolved |
 
 ### Medium Effort (1-5 days)
 
@@ -175,7 +194,7 @@
 | PF-035 | 20 | Moved apt-get inside cache guard with `command -v` check | 2-4 hours | Resolved |
 | PF-017 | 40 | Flush-and-continue: paste buffer flushes to edit buffer when full | 1-2 days | Resolved |
 | PF-019 | 30 | buffer_full flag stops writes on overflow; cursor positioning skipped | 1 day | Resolved |
-| PF-022 | 20 | Replace linear scan dedup with hash set for O(1) lookup, or swap-remove + re-sort | 1 day | Deferred |
+| PF-022 | 20 | Replaced with O(n) single-pass compacting dedup | 1 hour | Resolved |
 | PF-024 | -- | Add GitLab CI `cache:` directive for Zig installation directory | 1-2 hours | Resolved |
 | PF-014 | -- | Stream history file or read from end | 2-3 days | Deferred |
 
@@ -183,7 +202,7 @@
 
 | PF-ID | Score | Fix | Effort | Status |
 |-------|-------|-----|--------|--------|
-| PF-011 | 24 | Arena allocator for completion lifecycle. Rescored 30->24 (256 alloc/free ~25-50us, once per Tab) | 2-3 days | Deferred |
+| PF-011 | 24 | Arena allocator for completion lifecycle. ArenaAllocator field in CompletionContext; reset(.retain_capacity) in reset() | 2 hours | Resolved |
 | PF-010 | 25 | Ring buffer for history or swap-remove with sort | 3-5 days | Deferred |
 | PF-013 | -- | Benchmark suite (render, paste, history, completion) | 3-5 days | Deferred |
 | PF-023 | -- | Buffer search mode output into stack buffer; single flush per keystroke. Corrected: 1 write/keystroke + 1 on search entry (not 2/keystroke) | 1 day | Deferred |
@@ -200,7 +219,8 @@
 | PF-015 | P1 | [#67](https://gitlab.com/devnw/zig/repl/-/issues/67) | Resolved |
 | PF-004 | P2 | [#66](https://gitlab.com/devnw/zig/repl/-/issues/66) | Resolved |
 | PF-010 | P3 | [#69](https://gitlab.com/devnw/zig/repl/-/issues/69) | Deferred |
-| PF-011 | P3 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Deferred |
+| PF-011 | P3 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Resolved |
+| PF-009 | P3 | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Resolved |
 | PF-012 | Info | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) | Resolved |
 
 *Note: PF-021 through PF-042 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*

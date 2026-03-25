@@ -25,6 +25,13 @@ const builtin = @import("builtin");
 var saved_termios: if (builtin.os.tag == .windows) void else ?std.posix.termios =
     if (builtin.os.tag == .windows) {} else null;
 
+/// Cached terminal width (PF-021). Invalidated by SIGWINCH handler (PF-040).
+var cached_terminal_width: usize = 0;
+
+/// Flag set by SIGWINCH handler to indicate terminal resize.
+/// Async-signal-safe: single atomic store from signal handler.
+var terminal_resized: bool = true; // true initially to force first fetch
+
 /// Signal handler that restores the terminal to its original state and
 /// then re-raises the received signal with the default disposition so
 /// the process exits with the standard signal semantics (correct exit
@@ -59,6 +66,12 @@ fn handleTerminalSignal(sig: i32) callconv(.c) void {
     _ = sys.kill(sys.getpid(), sig);
 }
 
+/// SIGWINCH handler that sets the resize flag for cached width invalidation.
+/// Async-signal-safe: only sets a volatile boolean.
+fn handleResizeSignal(_: i32) callconv(.c) void {
+    terminal_resized = true;
+}
+
 /// Register signal handlers for terminal cleanup on the given signals.
 /// Called from `enterRawMode` after saving the original terminal state.
 fn installTerminalSignalHandlers() void {
@@ -73,6 +86,15 @@ fn installTerminalSignalHandlers() void {
 
     std.posix.sigaction(std.posix.SIG.TERM, &sa, null);
     std.posix.sigaction(std.posix.SIG.HUP, &sa, null);
+
+    // SIGWINCH handler for terminal resize detection (PF-040).
+    // Not one-shot — must persist to detect repeated resizes.
+    const winch_sa = std.posix.Sigaction{
+        .handler = .{ .handler = handleResizeSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.WINCH, &winch_sa, null);
 }
 
 /// Remove the terminal signal handlers (restore default behavior).
@@ -88,6 +110,7 @@ fn removeTerminalSignalHandlers() void {
 
     std.posix.sigaction(std.posix.SIG.TERM, &default_sa, null);
     std.posix.sigaction(std.posix.SIG.HUP, &default_sa, null);
+    std.posix.sigaction(std.posix.SIG.WINCH, &default_sa, null);
 }
 
 /// Get a handle to standard input.
@@ -241,9 +264,26 @@ pub fn restoreTerminalMode(original: TerminalState) !void {
     saved_termios = null;
 }
 
-/// Get terminal width in columns.
+/// Get terminal width in columns (cached, invalidated by SIGWINCH).
 /// Returns 80 as default if unavailable.
 pub fn getTerminalWidth() usize {
+    // On POSIX, return cached value unless SIGWINCH set the resize flag.
+    if (builtin.os.tag != .windows and !terminal_resized and cached_terminal_width > 0) {
+        return cached_terminal_width;
+    }
+
+    const width = getTerminalWidthUncached();
+
+    if (builtin.os.tag != .windows) {
+        cached_terminal_width = width;
+        terminal_resized = false;
+    }
+
+    return width;
+}
+
+/// Perform the actual ioctl/syscall to fetch terminal width.
+fn getTerminalWidthUncached() usize {
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch return 80;
         var csbi: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;

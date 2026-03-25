@@ -148,17 +148,19 @@ pub const HistoryStore = struct {
         }
 
         // Global deduplication: remove any earlier exact match so the
-        // entry appears only once at the end of history.
+        // entry appears only once at the end of history.  Uses a single
+        // compacting pass — O(n) regardless of duplicate count (PF-022).
         if (self.deduplicate_global) {
-            var i: usize = 0;
-            while (i < self.entries.items.len) {
-                if (std.mem.eql(u8, self.entries.items[i], line)) {
-                    const removed = self.entries.orderedRemove(i);
-                    self.allocator.free(removed);
+            var write_idx: usize = 0;
+            for (self.entries.items) |entry| {
+                if (std.mem.eql(u8, entry, line)) {
+                    self.allocator.free(entry);
                 } else {
-                    i += 1;
+                    self.entries.items[write_idx] = entry;
+                    write_idx += 1;
                 }
             }
+            self.entries.shrinkRetainingCapacity(write_idx);
         }
 
         // Add to memory
@@ -202,8 +204,12 @@ pub const HistoryStore = struct {
 
             const file = self.append_handle.?;
             try file.seekFromEnd(0);
-            try file.writeAll(line);
-            try file.writeAll("\n");
+            // Write line and newline in a single writev syscall (PF-032).
+            const iovecs = [_]std.posix.iovec_const{
+                .{ .base = line.ptr, .len = line.len },
+                .{ .base = "\n", .len = 1 },
+            };
+            _ = try file.writev(iovecs[0..]);
         }
     }
 
