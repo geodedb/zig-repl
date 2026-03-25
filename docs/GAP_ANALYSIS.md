@@ -1,8 +1,8 @@
 # Gap Analysis Report
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Date:** 2026-03-24 (Phase 14 -- 6 gaps resolved, 1 blocked)
-**Previous audit:** 2026-03-24 (Phase 13, 1 open gap)
+**Date:** 2026-03-25 (Phase 16 -- 0 new gaps added, 7 resolved)
+**Previous audit:** 2026-03-24 (Phase 15, 8 open gaps)
 **Auditor:** Principal Engineer Audit (Claude Opus 4.6)
 **Zig Version Installed:** 0.15.2
 **Build Status:** Tests pass (`zig build test` exits 0, 285 tests)
@@ -11,12 +11,13 @@
 
 ## Summary
 
-- **Total gaps identified (all time):** 58
-- **Resolved (all time):** 57 (GAP-0001..GAP-0051, GAP-0053..GAP-0058)
+- **Total gaps identified (all time):** 65
+- **Resolved (all time):** 64 (GAP-0001..GAP-0051, GAP-0053..GAP-0065)
 - **Total open gaps:** 1
 - **Carried forward (still open):** 1 (GAP-0052 -- blocked on #31)
-- **Resolved this phase:** 6 (GAP-0053..GAP-0058)
-- **Previous resolved cycles:** 51 gaps resolved across Phases 1-13; 6 resolved in Phase 14. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
+- **New this phase:** 0
+- **Resolved this phase:** 7 (GAP-0059..GAP-0065)
+- **Previous resolved cycles:** 57 gaps resolved across Phases 1-14. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
 
 ---
 
@@ -92,7 +93,7 @@
 - **Acceptance criteria:**
   - Either release signing is implemented and documented, or the SECURITY.md claim is revised to match reality
 
-### GAP-0053: GAP_ANALYSIS.md test count stale (257 → 285) [RESOLVED]
+### GAP-0053: GAP_ANALYSIS.md test count stale (257 -> 285) [RESOLVED]
 - **Issue:** -- (doc staleness)
 - **Category:** Docs
 - **Severity:** Low
@@ -145,6 +146,69 @@
 - **Resolution:** Updated build.zig.zon `.minimum_zig_version` from "0.14.0" to "0.15.0" and README status table from "0.14.0+" to "0.15.x" to match the actual Zig 0.15.2 installed and required by the codebase.
 - **Evidence:** `build.zig.zon:5` -- `"0.15.0"`; `README.md:10` -- "0.15.x"
 - **Resolved date:** 2026-03-24
+
+### GAP-0059: README API Reference missing 8 public items [RESOLVED]
+- **Issue:** [#113](https://gitlab.com/devnw/zig/repl/-/issues/113)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Added Config, CompleteFn, terminalWriter, getStdinHandle, getStdoutHandle, getStderrHandle, isStderrTty, and version constants (version, version_major, version_minor, version_patch) to README.md API Reference section.
+- **Evidence:** `README.md` API Reference section now documents all public exports from `src/repl.zig`
+- **Resolved date:** 2026-03-25
+
+### GAP-0060: CHANGELOG.md missing v0.1.1 entry and broken links [RESOLVED]
+- **Issue:** [#114](https://gitlab.com/devnw/zig/repl/-/issues/114)
+- **Category:** Docs
+- **Severity:** Medium
+- **Status:** Closed / Implemented
+- **Resolution:** Added `## [0.1.1] - 2026-01-26` section with CI/CD changes. Fixed [Unreleased] link to compare v0.1.1...HEAD, added [0.1.1] comparison link, and fixed [0.1.0] link to releases page.
+- **Evidence:** `CHANGELOG.md` -- v0.1.1 section present; all comparison links use correct tag-based URLs
+- **Resolved date:** 2026-03-25
+
+### GAP-0061: Copyright year 2024-2025 stale in source files and LICENSE [RESOLVED]
+- **Issue:** [#115](https://gitlab.com/devnw/zig/repl/-/issues/115)
+- **Category:** Docs (Legal)
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Updated copyright year from "2024-2025" to "2024-2026" in all src/*.zig (15 files), examples/*.zig (8 files), tests/integration.zig, build.zig, LICENSE, .gitleaks.toml, and CODEOWNERS. Entity name discrepancy (CodePros vs DevNW LLC) left as maintainer decision per instructions.
+- **Evidence:** `grep -r "2024-2025"` returns only GAP_ANALYSIS.md references to the old state
+- **Resolved date:** 2026-03-25
+
+### GAP-0062: CONTRIBUTING.md:9 says "0.14.0" instead of "0.15.0" [RESOLVED]
+- **Issue:** [#112](https://gitlab.com/devnw/zig/repl/-/issues/112)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Updated `docs/CONTRIBUTING.md:9` from "Zig (0.14.0 or later)" to "Zig 0.15.0 or later" to match `build.zig.zon` `.minimum_zig_version`.
+- **Evidence:** `docs/CONTRIBUTING.md:9` -- "Zig 0.15.0 or later"
+- **Resolved date:** 2026-03-25
+
+### GAP-0063: Root CONTRIBUTING.md duplicates docs/CONTRIBUTING.md [RESOLVED]
+- **Issue:** [#116](https://gitlab.com/devnw/zig/repl/-/issues/116)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Replaced root CONTRIBUTING.md content with a short redirect to docs/CONTRIBUTING.md. No unique content from the root file needed merging.
+- **Evidence:** `CONTRIBUTING.md` -- 3-line redirect to `docs/CONTRIBUTING.md`
+- **Resolved date:** 2026-03-25
+
+### GAP-0064: .gitignore contains irrelevant Go/Python/Rust/Docker/Node rules [RESOLVED]
+- **Issue:** [#117](https://gitlab.com/devnw/zig/repl/-/issues/117)
+- **Category:** Code Quality
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Rewrote .gitignore from 206 lines to ~35 lines containing only Zig build artifacts, editor/IDE files, OS artifacts, secrets, and temporary files. Removed all Go, Python, Rust, Docker, and Node.js rules. Retained .claude/settings.local.json ignore.
+- **Evidence:** `.gitignore` -- contains only Zig-relevant rules
+- **Resolved date:** 2026-03-25
+
+### GAP-0065: README Building section incomplete format check command [RESOLVED]
+- **Issue:** [#118](https://gitlab.com/devnw/zig/repl/-/issues/118)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** Closed / Implemented
+- **Resolution:** Updated both README.md and docs/CONTRIBUTING.md format check commands from `zig fmt --check src/` to `zig fmt --check src/ tests/ examples/ build.zig` matching the Makefile check target.
+- **Evidence:** `README.md` and `docs/CONTRIBUTING.md` both show the complete format check command
+- **Resolved date:** 2026-03-25
 
 ---
 
@@ -203,3 +267,12 @@
 32. ~~**GAP-0056** -- Add SBOM to SECURITY.md CI scanning list (Low, Security)~~ Resolved
 33. ~~**GAP-0057** -- Add SyntheticKey to README API Reference (Low, Docs)~~ Resolved
 34. ~~**GAP-0058** -- Fix minimum Zig version inconsistency (Low, Docs)~~ Resolved
+
+### Phase 10: Documentation and quality cleanup (2026-03-25) -- COMPLETED
+35. ~~**GAP-0060** -- Add v0.1.1 entry to CHANGELOG.md and fix broken links (Medium, Docs)~~ Resolved (issue #114)
+36. ~~**GAP-0062** -- Update CONTRIBUTING.md Zig version from 0.14.0 to 0.15.0 (Low, Docs)~~ Resolved (issue #112)
+37. ~~**GAP-0065** -- Update README and CONTRIBUTING.md format check commands (Low, Docs)~~ Resolved (issue #118)
+38. ~~**GAP-0059** -- Add 8 missing public items to README API Reference (Low, Docs)~~ Resolved (issue #113)
+39. ~~**GAP-0063** -- Consolidate duplicate CONTRIBUTING.md files (Low, Docs)~~ Resolved (issue #116)
+40. ~~**GAP-0061** -- Update stale copyright years and unify entity name (Low, Docs/Legal)~~ Resolved (issue #115)
+41. ~~**GAP-0064** -- Clean up .gitignore to Zig-only rules (Low, Code Quality)~~ Resolved (issue #117)

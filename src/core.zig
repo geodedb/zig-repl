@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2024-2025 CodePros
+// Copyright (c) 2024-2026 CodePros
 
 //! Core REPL implementation
 //!
@@ -633,7 +633,8 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
                 state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
                 state.last_was_kill = true;
                 // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
             }
         },
         .delete_word_backward => {
@@ -643,7 +644,8 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
                 state.kill_ring.clearRetainingCapacity();
                 state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
                 // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
-                state.buffer.replaceRange(state.allocator, start, count, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, start, count, &.{}) catch unreachable;
                 state.cursor = start;
             }
             state.last_was_kill = true;
@@ -658,7 +660,8 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             state.kill_ring.clearRetainingCapacity();
             state.kill_ring.appendSlice(state.allocator, state.buffer.items[0..state.cursor]) catch {};
             // Single O(n) replaceRange instead of alloc+copy+clear+append cycle
-            state.buffer.replaceRange(state.allocator, 0, state.cursor, &.{}) catch {};
+            // Shrinking replaceRange with empty replacement cannot allocate.
+            state.buffer.replaceRange(state.allocator, 0, state.cursor, &.{}) catch unreachable;
             state.cursor = 0;
             state.last_was_kill = true;
         },
@@ -772,7 +775,8 @@ fn handleUnindent(state: *ReplState) void {
     if (line_start < state.buffer.items.len) {
         if (state.buffer.items[line_start] == '\t') {
             // Single O(n) replaceRange instead of orderedRemove
-            state.buffer.replaceRange(state.allocator, line_start, 1, &.{}) catch {};
+            // Shrinking replaceRange with empty replacement cannot allocate.
+            state.buffer.replaceRange(state.allocator, line_start, 1, &.{}) catch unreachable;
             if (state.cursor > line_start) state.cursor -= 1;
         } else if (state.buffer.items[line_start] == ' ') {
             // Count leading spaces (up to 4)
@@ -782,7 +786,8 @@ fn handleUnindent(state: *ReplState) void {
             }
             if (count > 0) {
                 // Single O(n) replaceRange instead of orderedRemove loop
-                state.buffer.replaceRange(state.allocator, line_start, count, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, line_start, count, &.{}) catch unreachable;
                 if (state.cursor > line_start) {
                     state.cursor -= @min(count, state.cursor - line_start);
                 }
@@ -823,12 +828,13 @@ fn handleCompletion(state: *ReplState) void {
         // Remove the current word
         const remove_len = state.cursor - ctx.word_start;
         if (remove_len > 0) {
+            // Shrinking replaceRange with empty replacement cannot allocate.
             state.buffer.replaceRange(
                 state.allocator,
                 ctx.word_start,
                 remove_len,
                 &.{},
-            ) catch {};
+            ) catch unreachable;
             state.cursor = ctx.word_start;
         }
 

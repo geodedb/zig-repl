@@ -1,8 +1,8 @@
 # Performance Gap Analysis -- devnw/zig/repl
 
 **Project:** gitlab.com/devnw/zig/repl
-**Last updated:** 2026-03-24 (Phase 10 review -- PF-039, PF-040 added; PF-009, PF-025 rescored)
-**Audit phase:** Phase 10 review -- 2 new Info findings (PF-039, PF-040); PF-009 score 30->20; PF-025 reclassified P3->Info
+**Last updated:** 2026-03-24 (Phase 11 review -- PF-041 merged into PF-026; PF-042 added)
+**Audit phase:** Phase 11 review -- PF-041 merged into PF-026 (search.zig:57 null start_index root cause); PF-042 new Info finding (completion sort on <=256 items)
 **Methodology:** Static code analysis with PerfScore framework
 
 ---
@@ -17,10 +17,10 @@
 | P1       | 0    | 3        | 3     | Material user-facing impact -- within sprint |
 | P2       | 1    | 5        | 6     | Moderate impact / cost -- next quarter |
 | P3       | 6    | 7        | 13    | Minor optimization -- backlog |
-| Info     | 14   | 2        | 16    | Hardening / best practice -- as capacity allows |
-| **Total**| **21** | **18** | **39** | |
+| Info     | 15   | 2        | 17    | Hardening / best practice -- as capacity allows |
+| **Total**| **22** | **18** | **40** | |
 
-**Progress since Phase 10 review:** Added PF-039 (Info, undo orderedRemove(0) at capacity) and PF-040 (Info, no SIGWINCH handler). Rescored PF-009 from 30 to 20 (dual buffer scan ~40-160ns, <1% of keystroke latency). Reclassified PF-025 from P3 (Score 15) to Info (targets in-memory fixedBufferStream, not file descriptor; ~200-500ns total for 100-char line). 18 of 39 total findings resolved. 21 open (1 P2, 6 P3, 14 Info).
+**Progress since Phase 11 review:** Merged PF-041 into PF-026 -- identified search.zig:57 as specific root cause (passes null to searchBackward, always re-scanning from end instead of resuming from state.history_index). Added PF-042 (Info) -- generateFilePathCandidates sorts <=256 candidates, O(n log n) on small N, single-digit microseconds, no action warranted. All 18 resolved findings verified with no regressions. 18 of 40 total findings resolved. 22 open (1 P2, 6 P3, 15 Info).
 
 ### Top 5 Open Risks by Expected Impact
 
@@ -46,7 +46,7 @@
 | 6 | PF-010 | P3 | 25 | orderedRemove(0) on history append overflow | history.zig | `orderedRemove(0)` when entries exceed max; O(n) per append at capacity | [#69](https://gitlab.com/devnw/zig/repl/-/issues/69) | Use ring buffer or swap-remove with sort | Deferred |
 | 7 | PF-022 | P3 | 20 | Global dedup orderedRemove(i) in while loop O(k*n) | history.zig:136-145 | `orderedRemove(i)` inside `while (i < self.entries.items.len)` loop when `deduplicate_global` is true; O(k*n) where k=duplicates, n=entries | -- | Use a hash set for O(1) lookup, or swap-remove + re-sort to avoid O(n) shift per removal | Deferred |
 | 8 | PF-009 | P3 | 20 | Redundant buffer scan (calculateVisualLines + calculateCursorPosition) | render.zig | Both functions iterate entire buffer independently; 2x full buffer scan per render. Rescored 30->20: adds ~40-160ns for typical lines, <1% of keystroke latency | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Merge into single pass returning both values; now in render.zig for future work | Deferred |
-| 9 | PF-026 | P3 | 15 | History search re-scans all entries per keystroke | core.zig:782, history.zig:224-234 | `searchBackward()` iterates all entries with `std.mem.indexOf` per entry; called on every keystroke in search mode | -- | Cache last match index and resume from there; or build incremental index | Deferred |
+| 9 | PF-026 | P3 | 15 | History search re-scans all entries per keystroke | search.zig:57, history.zig:236-239 | `searchBackward()` called at search.zig:57 with `null` start_index, causing full re-scan from end on every keystroke (history.zig:237 falls through to `self.entries.items.len`). Fix: pass `state.history_index` as start_index to resume from last match position | -- | Pass `state.history_index` instead of `null` to `searchBackward()` at search.zig:57; cache and resume from last match position | Deferred |
 | 10 | PF-025 | Info | -- | Byte-by-byte writeAll to fixedBufferStream in render loop | core.zig:273-288 | `w.writeAll(&[_]u8{c})` in per-character loop; targets in-memory fixedBufferStream, not file descriptor. Per-byte overhead ~2-5ns function-call cost; ~200-500ns total for 100-char line. Reclassified P3->Info: not an I/O problem | -- | Batch write contiguous printable runs; only break for control character substitutions | Deferred |
 | ~~11~~ | PF-028 | P3 | 25 | History load() dupes all lines then frees excess beyond max_entries | history.zig:88-109 | `allocator.dupe(u8, line)` for every line, then frees excess entries when count > max_entries; 10k-line file = 10k allocs + 5k frees | -- | Two-pass approach: count lines first, skip `total - max_entries` before allocating | Resolved |
 | ~~12~~ | PF-027 | P3 | 20 | History ArrayList no preallocation during load() | history.zig:43,88-94 | `initCapacity(allocator, 0)` at line 43; `append` in loop at lines 89-94 causes ~13 reallocs for 5000 entries (geometric growth) | -- | Added `ensureTotalCapacity(min(file_size / 40, max_entries))` before load loop | Resolved |
@@ -64,7 +64,8 @@
 | 24 | PF-038 | Info | -- | Undo pre-snapshot alloc+free on non-destructive keypresses | core.zig:371,393-394 | `allocator.dupe()` runs on every keypress; freed immediately at line 394 for non-destructive actions (~15-40% of keypresses). Cost ~100-300ns per wasted cycle; terminal I/O syscalls are 100-1000x more expensive | -- | Conditional dupe (only allocate after action is classified as destructive). Not worth the complexity -- adds a second keymap dispatch or deferred snapshot pattern for sub-microsecond gain | Deferred |
 | 25 | PF-039 | Info | -- | UndoStack orderedRemove(0) at capacity | undo.zig:57,75 | `orderedRemove(0)` shifts up to 99 entries (~2.4KB) when stack is full; ~100-200ns per destructive keypress. L1-cache-resident data, 50-100x cheaper than any syscall | -- | Replace with ring buffer (write index wraps around). Low priority -- data fits in L1 cache and cost is negligible vs. terminal I/O | Deferred |
 | 26 | PF-040 | Info | -- | No SIGWINCH handler (enabler for PF-021) | platform.zig:242-258 | Signal infrastructure exists for SIGTERM/SIGHUP but SIGWINCH is not registered. Prerequisite for PF-021 (terminal width caching via SIGWINCH invalidation). No standalone performance impact | -- | Register SIGWINCH handler alongside existing SIGTERM/SIGHUP handlers; set a flag that getTerminalWidth() checks to refresh cached value. Implement when PF-021 is addressed | Deferred |
-| ~~27~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
+| 27 | PF-042 | Info | -- | generateFilePathCandidates sorts all candidates after directory iteration | completion.zig:270-276 | `std.mem.sort` on up to 256 candidates (MAX_FILE_CANDIDATES) after directory iteration; O(n log n) where n<=256; single-digit microseconds; runs once per Tab press | -- | No action warranted. O(n log n) on <=256 items is negligible (~1-5us). Sort provides consistent user-facing ordering | Deferred |
+| ~~28~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
 
 ### Resolved Findings
 
@@ -113,7 +114,7 @@
 | PF-010 | P3 | 25 | history.zig | orderedRemove(0) on append overflow | Deferred |
 | PF-022 | P3 | 20 | history.zig | Global dedup orderedRemove in while loop O(k*n) | Deferred |
 | PF-025 | Info | -- | core.zig | Byte-by-byte writeAll to fixedBufferStream (reclassified P3->Info) | Deferred |
-| PF-026 | P3 | 15 | core.zig, history.zig | History search re-scans all entries per keystroke | Deferred |
+| PF-026 | P3 | 15 | search.zig, history.zig | History search re-scans all entries per keystroke (null start_index at search.zig:57) | Deferred |
 | PF-020 | P3 | 15 | core.zig | reverse_tab orderedRemove x4 | Resolved |
 | PF-028 | P3 | 25 | history.zig | History load() dupes all lines then frees excess | Resolved |
 | PF-027 | P3 | 20 | history.zig | History ArrayList no preallocation during load() | Resolved |
@@ -128,6 +129,7 @@
 | PF-038 | Info | -- | core.zig | Undo pre-snapshot alloc+free on non-destructive keypresses | Deferred |
 | PF-039 | Info | -- | undo.zig | UndoStack orderedRemove(0) at capacity | Deferred |
 | PF-040 | Info | -- | platform.zig | No SIGWINCH handler (enabler for PF-021) | Deferred |
+| PF-042 | Info | -- | completion.zig | generateFilePathCandidates sorts <=256 candidates (negligible) | Deferred |
 
 ### Infrastructure (`area::infra`)
 
@@ -152,7 +154,8 @@
 | PF-027 | 20 | Added `ensureTotalCapacity(min(file_size / 40, max_entries))` before history load loop | 30 min | Resolved |
 | PF-029 | -- | Pre-allocate multi_line_buffer with `ensureTotalCapacity(input.len + 1)` before append | 15 min | Deferred |
 | PF-025 | -- | Batch contiguous printable character runs into single writeAll calls in render loop (reclassified P3->Info) | 1-2 hours | Deferred |
-| PF-026 | 15 | Cache last match index in searchBackward; resume search from cached position | 2-3 hours | Deferred |
+| PF-026 | 15 | Pass `state.history_index` instead of `null` to `searchBackward()` at search.zig:57; resume from last match position instead of full re-scan | 1-2 hours | Deferred |
+| PF-042 | -- | No action warranted. O(n log n) sort on <=256 items at completion.zig:270-276 is ~1-5us per Tab press | -- | Deferred |
 | PF-030 | -- | Pre-allocate search_buffer with 64-128 bytes at init | 15 min | Deferred |
 | PF-031 | -- | Pre-allocate ReplState buffers with reasonable defaults (buffer=256, kill_ring=128, etc.) | 30 min | Deferred |
 | PF-032 | -- | Concatenate history line + newline into single write | 30 min | Deferred |
@@ -199,7 +202,7 @@
 | PF-011 | P3 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Deferred |
 | PF-012 | Info | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) | Resolved |
 
-*Note: PF-021 through PF-040 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*
+*Note: PF-021 through PF-042 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*
 
 ---
 
@@ -207,6 +210,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 (Phase 11 review) | Phase 11 review: 1 finding merged, 1 new Info finding added, 0 regressions. **PF-041 merged into PF-026:** handleSearch at search.zig:57 passes `null` to `searchBackward()`, causing full history re-scan from end on every keystroke. This is the specific root cause of PF-026. Fix: pass `state.history_index` as `start_index` to resume from last match position. PF-026 evidence updated (core.zig:782 -> search.zig:57, history.zig:236-239). **PF-042 (NEW, Info):** `generateFilePathCandidates` at completion.zig:270-276 sorts all candidates after directory iteration. O(n log n) on <=256 items (MAX_FILE_CANDIDATES), single-digit microseconds, runs once per Tab press. No action warranted. **Verification:** All 18 resolved findings verified with no regressions. Updated severity distribution (40 total, 22 open, 18 resolved; Info open 14->15). No GitLab issues created (both Info-level or existing). |
 | 2026-03-24 (Phase 10 review) | Phase 10 review: 2 new Info findings added, 2 severity adjustments. **New findings:** PF-039 (Info) -- UndoStack orderedRemove(0) at capacity shifts ~99 entries (~2.4KB), ~100-200ns per destructive keypress, L1-cache-resident and 50-100x cheaper than any syscall. PF-040 (Info) -- No SIGWINCH handler; signal infrastructure exists for SIGTERM/SIGHUP but SIGWINCH not registered; prerequisite enabler for PF-021 terminal width caching; no standalone perf impact. **Severity adjustments:** PF-009 rescored 30->20 (P3): dual buffer scan adds ~40-160ns for typical lines, <1% of keystroke latency; score 30 overstated impact but fix remains worthwhile. PF-025 reclassified P3 (Score 15)->Info: "byte-by-byte writeAll" targets in-memory fixedBufferStream, not file descriptor; per-byte overhead ~2-5ns function-call cost, ~200-500ns total for 100-char line; not an I/O problem. No GitLab issues created (all Info/P3 level). Updated severity distribution (39 total, 21 open, 18 resolved). |
 | 2026-03-24 (Phase 9 audit) | Phase 9 audit: added PF-038 (Info) -- undo pre-snapshot alloc+free on non-destructive keypresses. Originally flagged as P2 by Phase 2 scanner, downgraded to Info by Phase 3 deep reviewer. Absolute cost ~100-300ns per non-destructive keypress; terminal I/O syscalls are 100-1000x more expensive. Persistent shadow buffer fix adds complexity for near-zero gain. No GitLab issue created (Info-level). Updated severity distribution (37 total, 19 open, 18 resolved). Corrected pre-existing count errors: P2 resolved 6->5 (total 7->6), P3 open/resolved 6/8->7/7. |
 | 2026-03-24 (Phase 10) | Phase 10 performance review: added 10 new findings (PF-027 through PF-036). 3 P3 findings: PF-027 (history ArrayList no preallocation, Score 20), PF-028 (history load dupes all lines then frees excess, Score 25), PF-035 (apt-get install in every CI job, Score 20). 7 Info findings: PF-029 (appendToMultiLine no pre-allocate), PF-030 (search_buffer capacity 0), PF-031 (ReplState buffers capacity 0), PF-032 (two writeAll syscalls in history append), PF-033 (shouldUseColor 2 getenv + 1 isatty), PF-034 (Config.loadFromFile no pre-size-check), PF-036 (build job missing --summary all). No GitLab issues created -- all findings are P3/Info backlog. Updated severity distribution (37 total, 20 open, 17 resolved), top 5 risks, roadmap. |

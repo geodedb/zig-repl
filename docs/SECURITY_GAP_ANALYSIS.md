@@ -1,22 +1,22 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-24 (Phase 12 gap closure)
+**Date:** 2026-03-24 (Phase 13 new findings)
 **Auditor:** Security Reviewer (automated + manual code review)
 **Scope:** Full source tree at commit `f8eab0c` (branch: main)
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 9 (Phase 12 gap closure -- SF-023 resolved)
+**Revision:** 10 (Phase 13 -- 5 new findings SF-024 through SF-028)
 
 ---
 
 ## Overall Assessment
 
-**No Critical or High severity findings. Zero open findings. 23 total SF-IDs tracked.**
+**No Critical or High severity findings. 3 open findings (3 Low). 28 total SF-IDs tracked.**
 
 The Zig REPL library maintains a sound security posture for a v0.1.0 release. The codebase
 is memory-safe by default (Zig's safety checks), has no external C dependencies, and
-uses minimal attack surface. Since the initial audit (2026-03-23), **17 of 22 findings
-have been resolved**, with 3 marked Won't Do, 1 confirmed No Action Needed, and 0 open.
+uses minimal attack surface. Since the initial audit (2026-03-23), **20 of 28 findings
+have been resolved**, with 3 marked Won't Do, 1 confirmed No Action Needed, and 3 open (3 Low).
 
 Phase 9 audit (2026-03-24) performed a Phase 3 deep review. NC-001 and NC-002 (existing
 Low findings from Phase 2) were re-confirmed at Low severity with no changes. Two new
@@ -35,6 +35,13 @@ Phase 12 gap closure (2026-03-24) resolved SF-023:
 All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed
 and confirmed secure.
 
+Phase 13 new findings (2026-03-24) identified 5 new validated findings (SF-024 through SF-028):
+- **SF-024**: History `clear()` missing chmod on pre-existing file (`src/history.zig:214`) -- **Open** (Low, risk 8)
+- **SF-025**: Signal handler uses `std.os.linux.*` on all POSIX platforms (`src/platform.zig:40,45,55`) -- **Open** (Medium, risk 35). Blocks macOS/FreeBSD support. GitLab issue created.
+- **SF-026**: Undo buffer `appendSlice` bypasses display sanitization (`src/core.zig:741`) -- **Open** (Low/Info, risk 5). Theoretical only; no action required.
+- **SF-027**: `saved_termios` global not async-signal-safe (`src/platform.zig:25,39,210,237`) -- **Open** (Low, risk 8). Mitigated by SA_RESETHAND one-shot and narrow race window.
+- **SF-028**: `delete_to_eol` directly mutates ArrayList length field (`src/core.zig:654`) -- **Open** (Low/Info, risk 5). Informational; optional cleanup.
+
 See "Phase 5 Manual Review Findings" section below for details on MF-001 through MF-005
 findings from Phase 5.
 
@@ -51,23 +58,26 @@ findings from Phase 5.
 - Structured error handling throughout
 
 **Remaining areas:**
+- Signal handler async-signal-safety of `saved_termios` (SF-027 -- Low, open, mitigated)
+- Undo buffer sanitization theoretical gap (SF-026 -- Low, informational, no action required)
+- `delete_to_eol` direct ArrayList mutation (SF-028 -- Low, informational, optional cleanup)
 - Supply chain pinning for CI/CD dependencies (SF-012 -- Won't Do, external tooling)
 
 ---
 
 ## Audit Progression
 
-| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Delta (Phase 10 to 11) |
-|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|------------------------|
-| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 0 |
-| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | -2 |
-| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | +2 |
-| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
-| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
-| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | -2 |
-| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | +2 resolved |
+| Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Delta (Phase 12 to 13) |
+|--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|------------------------|
+| Total findings | 12 | 15 (cumulative) | 15 | 20 | 20 | 20 | 22 | 22 | 22 | 23 | 28 | +5 |
+| Open | 12 | 6 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 5 | +5 |
+| Resolved | 0 | 8 | 10 | 13 | 15 | 15 | 15 | 15 | 17 | 18 | 18 | 0 |
+| Won't Do | 0 | 0 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0 |
+| No Action Needed | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Reclassified | 0 | 1 (SF-002 -> SF-014) | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 |
+| Medium severity (open) | 4 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | +1 |
+| Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | +4 |
+| Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | +5 new |
 
 ---
 
@@ -77,22 +87,26 @@ findings from Phase 5.
 |----------|-------|------|----------|----------|-----------|-----|
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
 | High | 0 | 0 | 0 | 0 | 0 | 30 days |
-| Medium | 6 | 0 | 5 | 0 | 0 | 90 days |
-| Low | 17 | 0 | 13 | 3 | 1 | 180 days |
+| Medium | 7 | 0 | 6 | 0 | 0 | 90 days |
+| Low | 21 | 3 | 14 | 3 | 1 | 180 days |
 | Info | 0 | 0 | 0 | 0 | 0 | Backlog |
-| **Total** | **22** | **0** | **17** | **3** | **1** | |
+| **Total** | **28** | **3** | **20** | **3** | **1** | |
 
-Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved).
+Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-026 and SF-028 are informational Low findings (risk 5).
 
-### Zero open findings. No Critical, High, Medium, or Low findings remain open.
+### 3 open findings: 3 Low (SF-026, SF-027, SF-028). No Critical, High, or Medium findings.
 
 ---
 
 ## Stack-Ranked Findings Table
 
-### Open Findings (Phase 11)
+### Open Findings (Phase 13, updated Phase 16)
 
-_No open findings. All 22 SF-IDs are resolved, won't do, or no action needed._
+| Rank | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Evidence (file:line) | Confidence | SLA |
+|------|-------|----------|------------|---------|-----------|-------------|----------------------|------------|-----|
+| 1 | SF-027 | Low | 8 | `saved_termios` global not async-signal-safe | platform | CWE-364 | `src/platform.zig:25,39,210,237` | suspected | 180 days (2026-09-20) |
+| 2 | SF-026 | Low | 5 | Undo buffer `appendSlice` bypasses display sanitization | core | CWE-116 | `src/core.zig:741` | suspected | 180 days (2026-09-20) |
+| 3 | SF-028 | Low | 5 | `delete_to_eol` directly mutates ArrayList length field | core | CWE-119 | `src/core.zig:654` | suspected | 180 days (2026-09-20) |
 
 ### Recently Resolved (Phase 4)
 
@@ -119,6 +133,9 @@ _No open findings. All 22 SF-IDs are resolved, won't do, or no action needed._
 
 | SF-ID | Severity | Risk Score | Finding | Component | CWE / OWASP | Resolution | Verified |
 |-------|----------|------------|---------|-----------|-------------|------------|----------|
+| SF-025 | Medium | 35 | Signal handler uses `std.os.linux.*` on all POSIX platforms | platform | CWE-474 / A05:2021 | Signal handler updated to use `std.posix.system.*` instead of `std.os.linux.*` for cross-platform POSIX support in `handleTerminalSignal` at `src/platform.zig`. | 2026-03-25 |
+| SF-024 | Low | 8 | History `clear()` missing chmod on pre-existing file | history | CWE-732 / A01:2021 | Added `chmod(0o600)` after `createFile` in `clear()` at `src/history.zig:217-220`, matching the pattern already used in `appendLine()`. | 2026-03-25 |
+| SF-023 | Low | 8 | Config file missing chmod on pre-existing file | config | CWE-732 / A01:2021 | Added `file.chmod(0o600)` after file open in `src/config.zig:162` to enforce permissions on pre-existing config files (same class as SF-022). | 2026-03-24 |
 | SF-021 | Low | 8 | Static mutable `home_dir_buf` without thread safety | completion | CWE-362 | Changed `var home_dir_buf` to `threadlocal var home_dir_buf` at `src/completion.zig:188`. Each thread gets its own copy; no behavioral change for single-threaded callers. | 2026-03-24 |
 | SF-022 | Low | 8 | History file TOCTOU on permissions | history | CWE-367 | Added `file.chmod(0o600)` after file open in `src/history.zig` to enforce permissions regardless of pre-existing mode. Eliminates TOCTOU race on permission check. | 2026-03-24 |
 | SF-014 | Medium | 50 | Signal handler dead code -- enterRawMode() never calls installTerminalSignalHandlers() | platform | CWE-404 | `enterRawMode()` now sets `saved_termios = original` and calls `installTerminalSignalHandlers()` at `src/platform.zig:193-194`. `restoreTerminalMode()` now calls `removeTerminalSignalHandlers()` and sets `saved_termios = null` at `src/platform.zig:219-220`. | 2026-03-24 |
@@ -204,6 +221,233 @@ All scanners re-run with zero findings:
 | osv-scanner | Known vulnerabilities | 0 |
 | semgrep | Static analysis | 0 |
 | checkov | Infrastructure-as-code | 0 |
+
+---
+
+## Phase 13 Findings (2026-03-24)
+
+Phase 13 identified 5 new validated findings from targeted code review of signal handling,
+history file operations, undo buffer paths, and ArrayList API usage patterns.
+
+One finding (SF-025, Medium) has a GitLab issue created as it blocks macOS/FreeBSD platform
+support. The remaining 4 Low findings are tracked in this gap analysis only per existing policy.
+
+### SF-024: History clear() missing chmod on pre-existing file [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 8 (Impact: 2 x Likelihood: 1 x 4) |
+| **CWE** | CWE-732: Incorrect Permission Assignment for Critical Resource |
+| **OWASP** | A01:2021 Broken Access Control |
+| **Confidence** | confirmed |
+| **Exploit Surface** | Requires physical access or same-user compromise |
+| **Status** | **Resolved** |
+| **SLA** | 180 days (2026-09-20) |
+| **Resolution** | Added `chmod(0o600)` after `createFile` in `clear()` at `src/history.zig:217-220` |
+| **Resolved date** | 2026-03-25 |
+
+**Summary:** The `clear()` method at `src/history.zig:214` calls `createFile(path, .{ .truncate = true, .mode = 0o600 })` but does not call `file.chmod(0o600)` afterward. The `.mode` parameter only applies when creating a new file. If the file already exists with permissive permissions, `clear()` will truncate it but leave the permissions unchanged. This is the same class of issue as SF-022, which was fixed for `appendLine()` at line 187 but not applied to `clear()`.
+
+**Impact:** If a history file exists with permissive permissions (e.g., pre-created by an attacker at 0o644), `clear()` truncates the file but does not tighten permissions. Subsequent history writes via `appendLine()` (which does have the chmod) would fix the permissions on the next append, but there is a window between `clear()` and the next `appendLine()` where the file remains world-readable.
+
+**Likelihood:** Extremely low. Same preconditions as SF-022: attacker must have write access to the user's home directory and pre-create the history file. The `appendLine()` path already has the chmod fix, narrowing the race window.
+
+**Evidence:**
+```
+// src/history.zig:214 -- clear() path (no chmod after createFile)
+const file = std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 }) catch {
+    return;
+};
+file.close();
+```
+
+Compare with `appendLine()` at line 186-188 which correctly calls `file.chmod(0o600)` after open.
+
+**Attack scenario:** On a multi-user system, an attacker pre-creates `~/.repl_history` with mode 0o644. The user runs the REPL which calls `clear()` -- file is truncated but remains 0o644. Until the next `appendLine()` call (which fixes permissions), the empty file has permissive permissions. Practical impact is near-zero since the file is empty during this window.
+
+**How to verify:** Pre-create a history file with 0o644, call `clear()`, check if permissions remain 0o644.
+
+**Fix guidance:** Add `file.chmod(0o600) catch {};` after the `createFile` call in `clear()`, matching the pattern already used in `appendLine()` at line 187.
+
+**Acceptance criteria:**
+- `clear()` enforces 0o600 permissions on the history file after truncation, regardless of pre-existing mode
+- Same `chmod` pattern as `appendLine()` at `src/history.zig:186-188`
+
+**Affected paths:** `src/history.zig`
+
+---
+
+### SF-025: Signal handler uses std.os.linux.* on all POSIX platforms [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium |
+| **Risk Score** | 35 (Impact: 3 x Likelihood: 3 x 4) |
+| **CWE** | CWE-474: Use of Function with Inconsistent Implementations |
+| **OWASP** | A05:2021 Security Misconfiguration |
+| **Confidence** | confirmed |
+| **Exploit Surface** | All non-Linux POSIX platforms (macOS, FreeBSD, etc.) |
+| **Status** | **Resolved** |
+| **SLA** | 90 days (2026-06-22) |
+| **Issue** | [#120](https://gitlab.com/devnw/zig/repl/-/issues/120) (closed) |
+| **Resolution** | Signal handler updated to use `std.posix.system.*` instead of `std.os.linux.*` for cross-platform POSIX support in `handleTerminalSignal` at `src/platform.zig`. |
+| **Resolved date** | 2026-03-25 |
+
+**Summary:** The `handleTerminalSignal()` function at `src/platform.zig:35-56` uses `std.os.linux.tcsetattr`, `std.os.linux.write`, and `std.os.linux.kill` for async-signal-safe terminal restoration. These are Linux-specific syscall wrappers that do not exist on macOS or FreeBSD. The function is only guarded against Windows (`if (builtin.os.tag == .windows) return`), so on any non-Linux POSIX platform, this code will fail to compile.
+
+**Impact:** (1) Compile failure on macOS and FreeBSD -- completely blocks cross-platform POSIX support. (2) On affected platforms where the code cannot compile, terminal restoration on signal is unavailable, meaning SIGTERM/SIGHUP would leave the terminal in raw mode. This is a security impact (CWE-404 denial of service to the terminal) compounded by a portability defect.
+
+**Likelihood:** Certain on macOS/FreeBSD. Any attempt to `zig build` on these platforms will produce a compile error referencing missing `std.os.linux` symbols.
+
+**Evidence:**
+```
+// src/platform.zig:40 -- Linux-specific tcsetattr
+_ = std.os.linux.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
+
+// src/platform.zig:45 -- Linux-specific write
+_ = std.os.linux.write(std.posix.STDOUT_FILENO, "\x1b[?2004l", 8);
+
+// src/platform.zig:55 -- Linux-specific kill
+_ = std.os.linux.kill(std.os.linux.getpid(), sig);
+```
+
+All three should use `std.posix.system.*` (the OS-generic POSIX layer) or be wrapped in a `comptime` OS tag switch that selects the correct backend per platform.
+
+**Attack scenario:** A developer attempts to build the REPL library on macOS for a cross-platform project. The build fails. They work around it by commenting out or stubbing the signal handler, leaving the terminal unprotected on signal. Alternatively, they ship a Linux-only binary without realizing the signal handler is non-portable.
+
+**How to verify:** Run `zig build` on macOS or FreeBSD and observe compile errors referencing `std.os.linux.tcsetattr`, `std.os.linux.write`, `std.os.linux.kill`.
+
+**Fix guidance:** Replace Linux-specific calls with portable alternatives:
+- `std.os.linux.tcsetattr` -> `std.posix.system.tcsetattr` (or add comptime `os.tag` switch)
+- `std.os.linux.write` -> `std.posix.system.write`
+- `std.os.linux.kill` -> `std.posix.system.kill`
+- `std.os.linux.getpid` -> `std.posix.system.getpid`
+
+These `std.posix.system.*` functions dispatch to the correct platform backend at comptime while maintaining async-signal-safety.
+
+**Acceptance criteria:**
+- `handleTerminalSignal()` compiles and functions correctly on Linux, macOS, and FreeBSD
+- Terminal is restored to original state when SIGTERM/SIGHUP is received on all POSIX platforms
+- No `std.os.linux.*` references remain in signal handler code path
+
+**Affected paths:** `src/platform.zig`
+
+---
+
+### SF-026: Undo buffer appendSlice bypasses display sanitization [OPEN]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 5 (Impact: 1 x Likelihood: 1 x 4) |
+| **CWE** | CWE-116: Improper Encoding or Escaping of Output |
+| **OWASP** | N/A |
+| **Confidence** | suspected |
+| **Exploit Surface** | Theoretical only |
+| **Status** | **Open** (informational, no action required) |
+| **SLA** | 180 days (2026-09-20) |
+
+**Summary:** The undo handler at `src/core.zig:741` uses `state.buffer.appendSlice()` to restore a previously saved buffer snapshot. This path does not go through `appendHistoryFiltered()` which strips control characters. However, this is purely theoretical because: (1) the undo buffer is populated from the edit buffer itself, which is already sanitized at input time; (2) the render path independently sanitizes all output. No unfiltered characters can enter the undo buffer through any existing code path.
+
+**Impact:** None in practice. The undo buffer restores a snapshot of the edit buffer, which was already sanitized when the content was originally inserted. The render pipeline provides a second layer of sanitization.
+
+**Likelihood:** Theoretical only. Would require a future code change to introduce a path that writes unsanitized content into the edit buffer, which then gets captured in an undo snapshot, and the render sanitization would also need to be bypassed.
+
+**Evidence:**
+```
+// src/core.zig:741
+state.buffer.appendSlice(state.allocator, entry.buffer) catch {
+```
+
+**How to verify:** Demonstrate that unsanitized control characters can enter the undo buffer. This is not currently possible given existing input paths.
+
+**Fix guidance:** No action required. The defense-in-depth is adequate: input sanitization prevents bad data from entering the buffer, and render sanitization prevents it from reaching the terminal. Adding explicit sanitization to the undo path would be purely belt-and-suspenders.
+
+**Acceptance criteria:** N/A -- informational finding. If addressed, the undo restore path would use `appendHistoryFiltered` or equivalent sanitization.
+
+**Affected paths:** `src/core.zig`
+
+---
+
+### SF-027: saved_termios global not async-signal-safe [OPEN]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 8 (Impact: 2 x Likelihood: 1 x 4) |
+| **CWE** | CWE-364: Signal Handler Race Condition |
+| **OWASP** | N/A |
+| **Confidence** | suspected |
+| **Exploit Surface** | Requires precise signal timing during raw mode enter/exit |
+| **Status** | **Open** (mitigated by SA_RESETHAND) |
+| **SLA** | 180 days (2026-09-20) |
+
+**Summary:** The signal handler `handleTerminalSignal()` at `src/platform.zig:39` reads the global `saved_termios` variable which is written by the main thread at `src/platform.zig:210` (`enterRawMode`) and `src/platform.zig:237` (`restoreTerminalMode`). The `std.posix.termios` struct is not atomic; a signal arriving during a partial write of `saved_termios` by the main thread could cause the handler to read a torn (partially updated) struct, leading to incorrect terminal restoration.
+
+**Impact:** In the worst case, the terminal could be left in a partially corrupted state after signal delivery during the narrow window when `saved_termios` is being written. The user would need to run `reset` to restore the terminal.
+
+**Likelihood:** Extremely low. The race window is the duration of a struct copy (~48 bytes on Linux). SA_RESETHAND ensures the handler fires at most once. The signal would need to arrive during the exact instruction sequence that copies the termios struct.
+
+**Evidence:**
+```
+// src/platform.zig:25 -- non-atomic global
+var saved_termios: if (builtin.os.tag == .windows) void else ?std.posix.termios = ...
+
+// src/platform.zig:39 -- signal handler reads it
+if (saved_termios) |original| {
+
+// src/platform.zig:210 -- main thread writes it
+saved_termios = original;
+
+// src/platform.zig:237 -- main thread clears it
+saved_termios = null;
+```
+
+**Attack scenario:** Not externally exploitable. An attacker would need to control signal delivery timing with instruction-level precision during the narrow window of a struct copy. This is not a realistic attack vector.
+
+**How to verify:** Static analysis tools that check for shared non-atomic access between signal handlers and main code would flag this pattern. Runtime reproduction would require instrumented builds with artificial delays in the struct copy.
+
+**Fix guidance:** Use `@atomicStore`/`@atomicLoad` on a pointer to the termios struct, or use a `sig_atomic_t` flag to gate access. Alternatively, accept the theoretical risk given SA_RESETHAND mitigation and document the design choice.
+
+**Acceptance criteria:** Either (a) `saved_termios` access is made signal-safe via atomic operations or a flag, or (b) the design choice is documented with rationale for accepting the risk.
+
+**Affected paths:** `src/platform.zig`
+
+---
+
+### SF-028: delete_to_eol directly mutates ArrayList length field [OPEN]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 5 (Impact: 1 x Likelihood: 1 x 4) |
+| **CWE** | CWE-119: Improper Restriction of Operations within the Bounds of a Memory Buffer |
+| **OWASP** | N/A |
+| **Confidence** | suspected |
+| **Exploit Surface** | Theoretical only |
+| **Status** | **Open** (informational, optional cleanup) |
+| **SLA** | 180 days (2026-09-20) |
+
+**Summary:** The `delete_to_eol` action at `src/core.zig:654` truncates the edit buffer by directly setting `state.buffer.items.len = state.cursor`. This bypasses the ArrayList API (which would use `shrinkRetainingCapacity` or `replaceRange`). The truncated bytes remain in the backing allocation but are inaccessible through the ArrayList's public interface.
+
+**Impact:** Minimal. The stale bytes in the backing allocation are not accessible through normal ArrayList operations. They would only be visible if code directly accessed the allocator's memory outside the ArrayList abstraction, which nothing in the codebase does. The behavior is functionally correct.
+
+**Likelihood:** Theoretical. The direct mutation is a common Zig pattern for truncation and is equivalent to `shrinkRetainingCapacity`. No existing code path reads beyond `items.len`.
+
+**Evidence:**
+```
+// src/core.zig:654
+state.buffer.items.len = state.cursor;
+```
+
+**How to verify:** Confirm that no code reads `state.buffer.allocatedSlice()` or accesses memory beyond `items.len`. Currently no such code exists.
+
+**Fix guidance:** Optional cleanup: replace `state.buffer.items.len = state.cursor` with `state.buffer.shrinkRetainingCapacity(state.cursor)` for API consistency. Not required for correctness or security.
+
+**Acceptance criteria:** N/A -- informational finding. If addressed, the line would use the ArrayList API method instead of direct field mutation.
+
+**Affected paths:** `src/core.zig`
 
 ---
 
@@ -631,11 +875,14 @@ No new action required.
 ## Risk Distribution
 
 ```
-OPEN (2 findings):
-8   [==]          SF-021  Static mutable home_dir_buf (thread safety)  [OPEN]
-8   [==]          SF-022  History file TOCTOU on permissions            [OPEN]
+OPEN (5 findings):
+35  [=======]     SF-025  Signal handler uses std.os.linux.* (portability) [OPEN]
+8   [==]          SF-024  History clear() missing chmod             [OPEN]
+8   [==]          SF-027  saved_termios not async-signal-safe       [OPEN]
+5   [=]           SF-026  Undo buffer bypasses sanitization (theoretical) [OPEN]
+5   [=]           SF-028  delete_to_eol mutates ArrayList length    [OPEN]
 
-RESOLVED (15 findings):
+RESOLVED (18 findings):
 50  [==========]  SF-014  Signal handler dead code                 [RESOLVED]
 45  [=========]   SF-001  History/config world-readable            [RESOLVED]
 40  [========]    SF-005  Bracketed paste forgery                  [RESOLVED]
@@ -651,6 +898,9 @@ RESOLVED (15 findings):
 10  [==]          SF-019  Vi de/e underflow guard restructured     [RESOLVED]
 10  [==]          SF-006  catch unreachable                        [RESOLVED]
 10  [==]          SF-011  False fuzz claim                         [RESOLVED]
+8   [==]          SF-023  Config file missing chmod (same as SF-022) [RESOLVED]
+8   [==]          SF-021  Static mutable home_dir_buf (thread safety) [RESOLVED]
+8   [==]          SF-022  History file TOCTOU on permissions        [RESOLVED]
 
 WON'T DO (3 findings):
 20  [====]        SF-012  CI pinned by mutable tag                 [WON'T DO]
@@ -667,17 +917,20 @@ NO ACTION NEEDED (1 finding):
 
 | CWE ID | CWE Name | Count | Findings | Status |
 |--------|----------|-------|----------|--------|
+| CWE-474 | Use of Function with Inconsistent Implementations | 1 | SF-025 | **Open** |
 | CWE-404 | Improper Resource Shutdown or Release | 1 | SF-014 | Resolved |
-| CWE-362 | Race Condition (Shared Resource) | 1 | SF-021 | **Open** |
-| CWE-367 | TOCTOU Race Condition | 1 | SF-022 | **Open** |
-| CWE-116 | Improper Encoding or Escaping | 3 | SF-009, SF-013, SF-017 | All Resolved |
+| CWE-362 | Race Condition (Shared Resource) | 1 | SF-021 | Resolved |
+| CWE-364 | Signal Handler Race Condition | 1 | SF-027 | **Open** |
+| CWE-367 | TOCTOU Race Condition | 1 | SF-022 | Resolved |
+| CWE-116 | Improper Encoding or Escaping | 4 | SF-009, SF-013, SF-017, SF-026 | SF-009/013/017 Resolved, SF-026 **Open** (theoretical) |
+| CWE-119 | Improper Restriction of Operations within Bounds | 1 | SF-028 | **Open** (informational) |
 | CWE-130 | Length Parameter Inconsistency | 3 | SF-010, SF-016, SF-018 | All Resolved |
 | CWE-191 | Integer Underflow | 1 | SF-019 | Resolved |
 | CWE-494 | Download Without Integrity Check | 1 | SF-020 | Resolved |
 | CWE-74 | Injection | 2 | SF-005, SF-015 | SF-005 Resolved, SF-015 Won't Do |
 | CWE-829 | Untrusted Control Sphere | 1 | SF-012 | Won't Do |
 | CWE-22 | Path Traversal | 1 | SF-008 | Won't Do (by design) |
-| CWE-732 | Incorrect Permission Assignment | 1 | SF-001 | Resolved |
+| CWE-732 | Incorrect Permission Assignment | 3 | SF-001, SF-023, SF-024 | SF-001/023 Resolved, SF-024 **Open** |
 | CWE-426 | Untrusted Search Path | 1 | SF-007 | Resolved |
 | CWE-190 | Integer Overflow | 1 | SF-003 | Resolved |
 | CWE-248 | Uncaught Exception | 1 | SF-006 | Resolved |
@@ -687,16 +940,18 @@ NO ACTION NEEDED (1 finding):
 
 ## Findings by Area
 
-### Terminal / Platform (4 findings, 0 open)
+### Terminal / Platform (6 findings, 2 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
 | SF-014 | 50 | Signal handler dead code -- now wired into enterRawMode/restoreTerminalMode | **Resolved** |
+| SF-025 | 35 | Signal handler uses `std.os.linux.*` on all POSIX -- blocks macOS/FreeBSD | **Open** |
 | SF-018 | 15 | renderPrompt fixed buffer -- buffer_full flag stops writes on overflow | **Resolved** |
 | SF-010 | 15 | Silent output truncation >4096 bytes | Resolved |
 | SF-006 | 10 | catch unreachable on init | Resolved |
+| SF-027 | 8 | `saved_termios` global not async-signal-safe (mitigated by SA_RESETHAND) | **Open** |
 
-### Input Handling / Completion (7 findings, 1 open)
+### Input Handling / Completion (9 findings, 2 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
@@ -706,16 +961,20 @@ NO ACTION NEEDED (1 finding):
 | SF-016 | 20 | Paste buffer flush-and-continue for arbitrarily large pastes | **Resolved** |
 | SF-017 | 10 | Search display -- input filter documented as intentional guard | **Resolved** |
 | SF-015 | 10 | Paste sanitization fragmentation gap (theoretical) | **Won't Do** |
-| SF-021 | 8 | Static mutable `home_dir_buf` without thread safety (Windows-only) | **Open** |
+| SF-021 | 8 | Static mutable `home_dir_buf` without thread safety (Windows-only) | **Resolved** |
+| SF-026 | 5 | Undo buffer `appendSlice` bypasses display sanitization (theoretical) | **Open** (informational) |
+| SF-028 | 5 | `delete_to_eol` directly mutates ArrayList length field | **Open** (informational) |
 
-### File System / Access Control (4 findings, 1 open)
+### File System / Access Control (6 findings, 1 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
 | SF-001 | 45 | History/config files world-readable | Resolved |
 | SF-007 | 25 | Env var path injection | Resolved |
 | SF-008 | 15 | File path completion traversal | **Won't Do** (by design) |
-| SF-022 | 8 | History file TOCTOU on permissions | **Open** |
+| SF-023 | 8 | Config file missing chmod on pre-existing file | **Resolved** |
+| SF-022 | 8 | History file TOCTOU on permissions | **Resolved** |
+| SF-024 | 8 | History `clear()` missing chmod on pre-existing file | **Open** |
 
 ### Vi Keymap (1 finding, 0 open)
 
@@ -723,12 +982,13 @@ NO ACTION NEEDED (1 finding):
 |-------|------|---------|--------|
 | SF-019 | 10 | Vi de/e command fragile underflow guard | **Resolved** |
 
-### History (2 findings, 1 open)
+### History (3 findings, 1 open)
 
 | SF-ID | Risk | Summary | Status |
 |-------|------|---------|--------|
 | SF-003 | 20 | @intCast overflow on 32-bit | Resolved |
-| SF-022 | 8 | History file TOCTOU on permissions (also in File System section) | **Open** |
+| SF-022 | 8 | History file TOCTOU on permissions (also in File System section) | **Resolved** |
+| SF-024 | 8 | History `clear()` missing chmod on pre-existing file (also in File System section) | **Open** |
 
 ### Supply Chain / CI (2 findings, 0 open)
 
@@ -752,22 +1012,27 @@ NO ACTION NEEDED (1 finding):
 
 | SF-ID | Fix | Effort | Status |
 |-------|-----|--------|--------|
-| SF-021 | Change `var home_dir_buf` to `threadlocal var home_dir_buf` | 5 min | **Open** |
-| SF-022 | Add `file.chmod(0o600)` after opening existing history files | 15 min | **Open** |
+| SF-024 | Add `file.chmod(0o600)` after createFile in `clear()` (same pattern as `appendLine()`) | 5 min | **Open** |
+| SF-028 | Replace `items.len = cursor` with `shrinkRetainingCapacity(cursor)` | 5 min | **Open** (optional) |
+| SF-026 | Add safety comment documenting undo path is pre-sanitized | 5 min | **Open** (optional) |
+| SF-027 | Document SA_RESETHAND mitigation as accepted risk, or add atomic flag | 30 min | **Open** |
+| SF-021 | Change `var home_dir_buf` to `threadlocal var home_dir_buf` | 5 min | Resolved |
+| SF-022 | Add `file.chmod(0o600)` after opening existing history files | 15 min | Resolved |
 | SF-019 | Restructured while-loop condition to `end + 1 < state.buffer.items.len` | 15 min | Resolved |
 | SF-017 | Added safety comment documenting input filter as intentional guard | 30 min | Resolved |
 | SF-020 | Pinned SHA-256 hashes in `.gitlab-ci.yml` variables; removed `index.json` fetch | 30 min | Resolved |
 
-### Medium (1-5 days) -- ALL RESOLVED
+### Medium (1-5 days)
 
 | SF-ID | Fix | Effort | Status |
 |-------|-----|--------|--------|
+| SF-025 | Replace `std.os.linux.*` with `std.posix.system.*` or comptime os.tag switch in signal handler | 2-4 hours | **Open** |
 | SF-016 | Flush-and-continue: paste buffer flushes to edit buffer when full | 1-2 hours | Resolved |
 | SF-018 | buffer_full flag: writes stop cleanly on overflow, cursor positioning skipped | 2-4 hours | Resolved |
 
 ### Strategic (> 5 days)
 
-No strategic items. All open findings are small, self-contained hardening tasks.
+No strategic items. All open findings are quick wins or medium effort tasks.
 
 ---
 
@@ -792,19 +1057,17 @@ All automated security scanners returned zero findings across all phases (initia
 
 ## Immediate Actions
 
-**No immediate actions required.** Two Low/suspected findings (SF-021, SF-022) are open
-but neither requires urgent remediation. Both have 180-day SLAs (due 2026-09-20).
+**No immediate rotation or emergency remediation required.** No leaked secrets, no active RCE, no authentication bypass.
 
-**Phase 10 validation audit summary:**
-- SF-021 and SF-022 remain at Low/suspected, risk scores unchanged at 8
-- All 15 resolved findings verified with no regressions
-- All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed and secure
-- Quality findings (handleCompletion cursor, Vi o/O cursor, duplicate catch "") assessed -- none exploitable
-- 0 new security findings, 0 regressions
-- No GitLab issues created (no new security findings)
+**Phase 13 action summary:**
+- **SF-025 (Medium, risk 35):** GitLab issue created. Blocks macOS/FreeBSD support. 90-day SLA (2026-06-22). Recommended for next sprint.
+- **SF-024 (Low, risk 8):** Quick fix (5 min). Add chmod after createFile in `clear()`. 180-day SLA.
+- **SF-027 (Low, risk 8):** Document accepted risk or add atomic flag. 180-day SLA. Mitigated by SA_RESETHAND.
+- **SF-026 (Low, risk 5):** Informational only. No action required.
+- **SF-028 (Low, risk 5):** Informational only. Optional cleanup.
 
 **No credentials, secrets, or actively exploitable remote vulnerabilities were found.**
 
 ---
 
-*Last updated: 2026-03-24 (Phase 10 -- validation audit; 0 new findings, 0 regressions; SF-021/SF-022 unchanged; all 15 resolved verified; trust boundaries secure; quality findings non-exploitable)*
+*Last updated: 2026-03-24 (Phase 13 -- 5 new findings SF-024 through SF-028; 28 total SF-IDs; 5 open [1 Medium, 4 Low]; 18 resolved; 3 won't do; 1 no action; GitLab issue created for SF-025)*

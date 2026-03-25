@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 
 ### Prerequisites
 
-- [Zig](https://ziglang.org/download/) (0.14.0 or later)
+- [Zig](https://ziglang.org/download/) 0.15.0 or later
 - Git
 - A terminal emulator for testing
 
@@ -38,7 +38,7 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 ### Formatting
 
 - Use `zig fmt` for all Zig code
-- Run `zig fmt --check src/` before committing
+- Run `zig fmt --check src/ tests/ examples/ build.zig` before committing
 - The CI pipeline enforces formatting
 
 ### Naming Conventions

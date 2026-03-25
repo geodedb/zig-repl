@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2024-2025 CodePros
+// Copyright (c) 2024-2026 CodePros
 
 //! Cross-platform terminal I/O utilities
 //!
@@ -30,19 +30,23 @@ var saved_termios: if (builtin.os.tag == .windows) void else ?std.posix.termios 
 /// the process exits with the standard signal semantics (correct exit
 /// code / core dump).
 ///
-/// Async-signal-safety: only uses raw syscalls via `std.os.linux` and
-/// does not allocate or acquire locks.
+/// Async-signal-safety: only uses raw syscalls via `std.posix.system`
+/// (which resolves to `std.os.linux` or `std.c` depending on the
+/// target) and does not allocate or acquire locks.
 fn handleTerminalSignal(sig: i32) callconv(.c) void {
     if (builtin.os.tag == .windows) return;
 
+    const sys = std.posix.system;
+
     // Restore original terminal attributes via the raw syscall (async-signal-safe).
     if (saved_termios) |original| {
-        _ = std.os.linux.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
+        _ = sys.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
     }
 
     // Also attempt to disable bracketed paste mode.
     // write() is async-signal-safe per POSIX.
-    _ = std.os.linux.write(std.posix.STDOUT_FILENO, "\x1b[?2004l", 8);
+    const disable_bracketed_paste = "\x1b[?2004l";
+    _ = sys.write(std.posix.STDOUT_FILENO, disable_bracketed_paste, disable_bracketed_paste.len);
 
     // Reset this signal to SIG_DFL and re-raise so the process exits
     // with the correct signal disposition (e.g. exit code 128+sig).
@@ -52,7 +56,7 @@ fn handleTerminalSignal(sig: i32) callconv(.c) void {
         .flags = 0,
     };
     std.posix.sigaction(@intCast(sig), &default_sa, null);
-    _ = std.os.linux.kill(std.os.linux.getpid(), sig);
+    _ = sys.kill(sys.getpid(), sig);
 }
 
 /// Register signal handlers for terminal cleanup on the given signals.

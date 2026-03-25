@@ -297,19 +297,26 @@ zig build test
 
 - `Repl` - Main REPL runner (call `Repl.run(options)` to start)
 - `ReplState` - Internal state (exposed for advanced use)
+- `Config` - Application configuration (persistent via `loadFromFile`/`saveToFile`)
 - `KeyEvent` - Parsed key events
 - `KeyAction` - Internal action enum for key dispatch (not returned by user callbacks)
 - `Keymap` - Keymap selection (`.emacs` or `.vi`)
+- `CompleteFn` - Tab completion callback function type
 - `SyntheticKey` - Named constants for special keys (Insert, Delete, Page Up, Page Down)
 - `Format` - Output format enum (`.text`, `.json`, `.csv`, `.table`)
 
 ### Platform Utilities
 
 - `TerminalWriter` - Terminal output with raw mode handling
+- `terminalWriter()` - Create a TerminalWriter for a given file handle
 - `Color` - Terminal colors
 - `Style` - Text styles (bold, dim, italic, underline)
+- `getStdinHandle()` - Get a handle to stdin for direct I/O operations
+- `getStdoutHandle()` - Get a handle to stdout for direct I/O operations
+- `getStderrHandle()` - Get a handle to stderr for direct I/O operations
 - `isStdinTty()` - Check if stdin is a TTY
 - `isStdoutTty()` - Check if stdout is a TTY
+- `isStderrTty()` - Check if stderr is a TTY
 
 ### History
 
@@ -325,6 +332,13 @@ zig build test
 - `isBalanced(input)` - Check bracket balance
 - `needsContinuation(input)` - Check for continuation operators
 
+### Version
+
+- `version` - Library version string (e.g., `"0.1.0"`)
+- `version_major` - Major version number
+- `version_minor` - Minor version number
+- `version_patch` - Patch version number
+
 ## Building
 
 ```bash
@@ -338,7 +352,7 @@ zig build -Doptimize=ReleaseSafe
 zig build test
 
 # Check formatting
-zig fmt --check src/
+zig fmt --check src/ tests/ examples/ build.zig
 ```
 
 ## Roadmap

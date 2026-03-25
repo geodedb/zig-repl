@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2024-2025 CodePros
+// Copyright (c) 2024-2026 CodePros
 
 //! Command history management
 //!
@@ -214,6 +214,12 @@ pub const HistoryStore = struct {
             const file = std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 }) catch {
                 return;
             };
+
+            // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
+            if (comptime std.fs.has_executable_bit) {
+                file.chmod(0o600) catch {};
+            }
+
             file.close();
         }
     }

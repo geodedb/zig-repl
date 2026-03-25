@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-01-26
+
+### Changed
+- Add release-semantic CI/CD component (v1.7.1) for GitLab releases
+- Add default runner tags (company, linux) to CI configuration
+- Add release stage to CI pipeline
+
 ## [0.1.0] - 2026-01-24
 
 ### Added
@@ -70,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Company runners with Alpine Linux support
 - Code coverage support via CI catalog v1.6.0
 
-[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/main...HEAD
-[0.1.0]: https://gitlab.com/devnw/zig/repl/-/commits/main
+[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.1...HEAD
+[0.1.1]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.0...v0.1.1
+[0.1.0]: https://gitlab.com/devnw/zig/repl/-/releases/v0.1.0

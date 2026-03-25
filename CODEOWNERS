@@ -1,6 +1,6 @@
 # CODEOWNERS - Require review for security-sensitive changes
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2024-2025 CodePros
+# Copyright (c) 2024-2026 CodePros
 
 # Default owners for everything
 *       @maintainers

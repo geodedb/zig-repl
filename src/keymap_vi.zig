@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2024-2025 CodePros
+// Copyright (c) 2024-2026 CodePros
 
 //! Vi/Vim-style keybindings
 //!
@@ -127,8 +127,8 @@ fn handleNormalMode(state: anytype, key: core.KeyEvent) core.KeyAction {
         },
         'O' => {
             state.vi_mode = .insert;
-            // Alloc failure is non-critical: cursor stays at 0, user sees no newline
-            state.buffer.insert(state.allocator, 0, '\n') catch {};
+            // Alloc failure: abort to insert mode without inserting newline
+            state.buffer.insert(state.allocator, 0, '\n') catch return .vi_insert_mode;
             state.cursor = 0;
             return .vi_insert_mode;
         },
@@ -240,7 +240,8 @@ fn handlePendingOperator(state: anytype, key: core.KeyEvent) ?core.KeyAction {
                 state.kill_ring.clearRetainingCapacity();
                 // Kill ring alloc failures are non-critical: delete still works, yank-back won't have data
                 state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;
@@ -250,7 +251,8 @@ fn handlePendingOperator(state: anytype, key: core.KeyEvent) ?core.KeyAction {
                 const start = findWordStart(state.buffer.items, state.cursor);
                 state.kill_ring.clearRetainingCapacity();
                 state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
-                state.buffer.replaceRange(state.allocator, start, state.cursor - start, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, start, state.cursor - start, &.{}) catch unreachable;
                 state.cursor = start;
                 state.last_was_kill = true;
                 state.pending_operator = null;
@@ -261,7 +263,8 @@ fn handlePendingOperator(state: anytype, key: core.KeyEvent) ?core.KeyAction {
                 const end = findEndOfWord(state.buffer.items, state.cursor);
                 state.kill_ring.clearRetainingCapacity();
                 state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch {};
+                // Shrinking replaceRange with empty replacement cannot allocate.
+                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;
