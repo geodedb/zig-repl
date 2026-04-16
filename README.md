@@ -7,7 +7,7 @@ A cross-platform, feature-rich REPL (Read-Eval-Print Loop) library for Zig.
 | Aspect | Info |
 |--------|------|
 | API Stability | Beta |
-| Zig Version | 0.15.x |
+| Zig Version | 0.16.x |
 | Platforms | Linux, macOS, Windows |
 
 ## Features
@@ -52,11 +52,11 @@ const std = @import("std");
 const repl = @import("repl");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var da: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = da.deinit();
 
     try repl.Repl.run(.{
-        .allocator = gpa.allocator(),
+        .allocator = da.allocator(),
         .prompt = ">>> ",
         .run_fn = runCommand,
     });
@@ -72,8 +72,8 @@ fn runCommand(
         return false; // exit REPL
     }
 
-    const stdout = std.io.getStdOut();
-    try stdout.writer().print("You entered: {s}\n", .{input});
+    const out = repl.terminalWriter();
+    try out.print("You entered: {s}\n", .{input});
     return true; // continue REPL
 }
 ```
@@ -107,13 +107,13 @@ The `Repl.run()` function accepts a configuration struct with these options:
 ## Terminal Output
 
 The library provides `TerminalWriter` for proper terminal output in raw mode.
-You can construct one from `std.io.getStdOut()` or receive `stdout` via `welcome_fn`:
+Use the convenience function `repl.terminalWriter()` or construct one from a file handle:
 
 ```zig
 const repl = @import("repl");
 
 // Create a TerminalWriter for stdout
-const out = repl.TerminalWriter{ .file = std.io.getStdOut(), .use_color = true };
+const out = repl.terminalWriter();
 
 // Basic output (handles \n -> \r\n conversion automatically)
 try out.write("Hello, world!\n");
@@ -384,6 +384,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the complete roadmap.
 Contributions are welcome! Please see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
 
 Key areas where help is needed:
+
 - [#3](https://gitlab.com/devnw/zig/repl/-/issues/3) - Integration tests
 - [#10](https://gitlab.com/devnw/zig/repl/-/issues/10) - Syntax highlighting
 - [#12](https://gitlab.com/devnw/zig/repl/-/issues/12) - Unicode support
