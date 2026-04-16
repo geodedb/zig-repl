@@ -23,11 +23,11 @@
 //! const repl = @import("repl");
 //!
 //! pub fn main() !void {
-//!     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//!     defer _ = gpa.deinit();
+//!     var da: std.heap.DebugAllocator(.{}) = .init;
+//!     defer da.deinit();
 //!
 //!     try repl.Repl.run(.{
-//!         .allocator = gpa.allocator(),
+//!         .allocator = da.allocator(),
 //!         .prompt = ">>> ",
 //!         .run_fn = runCommand,
 //!     });
@@ -40,8 +40,8 @@
 //!     _: *repl.HistoryStore,
 //! ) anyerror!bool {
 //!     if (std.mem.eql(u8, input, "quit")) return false;
-//!     const stdout = std.io.getStdOut();
-//!     try stdout.writer().print("{s}\n", .{input});
+//!     const out = repl.terminalWriter();
+//!     try out.print("{s}\n", .{input});
 //!     return true;
 //! }
 //! ```

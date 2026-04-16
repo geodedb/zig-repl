@@ -10,6 +10,7 @@
 //! - Prompt rendering
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const platform = @import("platform.zig");
 const history_mod = @import("history.zig");
 const completion = @import("completion.zig");
@@ -101,7 +102,7 @@ pub const IsCompleteFn = *const fn (input: []const u8) bool;
 pub const CompleteFn = *const fn (prefix: []const u8, ctx: *completion.CompletionContext) void;
 
 /// Welcome message printer function type.
-pub const WelcomeFn = *const fn (stdout: std.fs.File, use_color: bool) anyerror!void;
+pub const WelcomeFn = *const fn (stdout: std.Io.File, use_color: bool) anyerror!void;
 
 /// Main REPL interface
 pub const Repl = struct {
@@ -140,7 +141,7 @@ pub const Repl = struct {
         // Check for TTY
         if (!platform.isStdinTty()) {
             const stderr = platform.getStderrHandle();
-            try stderr.writeAll("Error: interactive shell requires a TTY\n");
+            try compat.writeAll(stderr, "Error: interactive shell requires a TTY\n");
             return error.NotATty;
         }
 
@@ -206,7 +207,7 @@ pub const Repl = struct {
 
         // Final newline
         const stdout = platform.getStdoutHandle();
-        stdout.writeAll("\r\n") catch {};
+        compat.writeAll(stdout, "\r\n") catch {};
     }
 };
 
@@ -270,14 +271,14 @@ fn renderPrompt(state: *ReplState) !void {
     // Accumulate all render output into a fixed buffer, then issue a single write.
     // If the buffer fills, we stop writing and output the valid partial content.
     var render_buf: [RENDER_BUF_SIZE]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&render_buf);
+    var fbs = compat.FixedBufferStream.init(&render_buf);
     const w = fbs.writer();
 
     var buffer_full = false;
 
     // Move cursor up from current row to start
     if (state.last_cursor_row > 0) {
-        std.fmt.format(w, "\x1b[{d}A", .{state.last_cursor_row}) catch {
+        w.print("\x1b[{d}A", .{state.last_cursor_row}) catch {
             buffer_full = true;
         };
     }
@@ -319,26 +320,26 @@ fn renderPrompt(state: *ReplState) !void {
         const cursor_pos = render_info.cursor_pos;
 
         if (cursor_pos.rows_from_end > 0) {
-            std.fmt.format(w, "\x1b[{d}A", .{cursor_pos.rows_from_end}) catch {
+            w.print("\x1b[{d}A", .{cursor_pos.rows_from_end}) catch {
                 buffer_full = true;
             };
         }
 
         if (!buffer_full) {
-            std.fmt.format(w, "\r\x1b[{d}C", .{cursor_pos.col}) catch {
+            w.print("\r\x1b[{d}C", .{cursor_pos.col}) catch {
                 buffer_full = true;
             };
         }
 
         // Single write for entire render output
-        try stdout.writeAll(fbs.getWritten());
+        try compat.writeAll(stdout, fbs.getWritten());
 
         // Update tracking state
         state.last_cursor_row = current_visual_lines - cursor_pos.rows_from_end;
     } else {
         // Buffer overflowed -- write the valid partial content we have.
         // Cursor positioning is skipped to avoid broken ANSI sequences.
-        try stdout.writeAll(fbs.getWritten());
+        try compat.writeAll(stdout, fbs.getWritten());
 
         // Without cursor positioning, assume cursor is at the end
         state.last_cursor_row = 0;
@@ -354,7 +355,7 @@ fn processInput(state: *ReplState) !void {
     var buf: [256]u8 = undefined;
 
     outer: while (true) {
-        const n = try stdin.read(&buf);
+        const n = try compat.read(stdin, &buf);
         if (n == 0) continue;
 
         var last_action: KeyAction = .none;
@@ -533,7 +534,7 @@ fn handleCommandSubmission(state: *ReplState) !void {
         state.is_continuation = true;
         resetLineState(state);
         const stdout = platform.getStdoutHandle();
-        try stdout.writeAll("\r\n");
+        try compat.writeAll(stdout, "\r\n");
         return;
     }
 
@@ -546,22 +547,22 @@ fn handleCommandSubmission(state: *ReplState) !void {
             state.history.append(complete_input) catch |err| {
                 if (state.verbose) {
                     const stderr = platform.getStderrHandle();
-                    stderr.writeAll("Warning: failed to append to history: ") catch {};
-                    stderr.writeAll(@errorName(err)) catch {};
-                    stderr.writeAll("\r\n") catch {};
+                    compat.writeAll(stderr, "Warning: failed to append to history: ") catch {};
+                    compat.writeAll(stderr, @errorName(err)) catch {};
+                    compat.writeAll(stderr, "\r\n") catch {};
                 }
             };
         }
 
         const stdout = platform.getStdoutHandle();
-        try stdout.writeAll("\r\n");
+        try compat.writeAll(stdout, "\r\n");
 
         if (state.run_fn) |handler| {
             const should_continue = handler(state.user_context, state.allocator, complete_input, state.history) catch |err| blk: {
                 const stderr = platform.getStderrHandle();
-                stderr.writeAll("Error: ") catch {};
-                stderr.writeAll(@errorName(err)) catch {};
-                stderr.writeAll("\r\n") catch {};
+                compat.writeAll(stderr, "Error: ") catch {};
+                compat.writeAll(stderr, @errorName(err)) catch {};
+                compat.writeAll(stderr, "\r\n") catch {};
                 break :blk true;
             };
             if (!should_continue) state.quit_requested = true;
@@ -575,7 +576,7 @@ fn handleCommandSubmission(state: *ReplState) !void {
         state.is_continuation = true;
         resetLineState(state);
         const stdout = platform.getStdoutHandle();
-        try stdout.writeAll("\r\n");
+        try compat.writeAll(stdout, "\r\n");
     }
 }
 
@@ -583,13 +584,13 @@ fn handleCommandSubmission(state: *ReplState) !void {
 fn handleCancellation(state: *ReplState) !void {
     const stdout = platform.getStdoutHandle();
     if (state.buffer.items.len == 0 and !state.is_continuation) {
-        try stdout.writeAll("\r\n^C\r\n");
+        try compat.writeAll(stdout, "\r\n^C\r\n");
         state.quit_requested = true;
     } else {
         state.is_continuation = false;
         state.multi_line_buffer.clearRetainingCapacity();
         resetLineState(state);
-        try stdout.writeAll("\r\n^C\r\n");
+        try compat.writeAll(stdout, "\r\n^C\r\n");
     }
 }
 
@@ -753,7 +754,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         },
         .clear_screen => {
             const stdout = platform.getStdoutHandle();
-            try stdout.writeAll("\x1b[2J\x1b[H");
+            try compat.writeAll(stdout, "\x1b[2J\x1b[H");
             state.last_visual_lines = 0;
             state.last_cursor_row = 0;
             state.content_changed = true;
@@ -1029,7 +1030,7 @@ test "renderPrompt: buffer overflow produces valid partial output" {
     // Our render code must stop writing (not silently continue) to avoid
     // broken ANSI escape sequences.
     var buf: [16]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var fbs = compat.FixedBufferStream.init(&buf);
     const w = fbs.writer();
 
     // Write data that fits
@@ -1042,17 +1043,13 @@ test "renderPrompt: buffer overflow produces valid partial output" {
     const result = w.writeAll("\r\n");
     try std.testing.expectError(error.NoSpaceLeft, result);
 
-    // The buffer should contain exactly what was successfully written.
-    // Importantly, the failed "\r\n" should NOT have partially written "\r".
-    // (fixedBufferStream.write does partial writes, but the second iteration
-    // of writeAll propagates the error, so at most 1 extra byte.)
+    // The buffer should contain exactly what was successfully written (15 bytes).
+    // Our FixedBufferStream is atomic: the failed writeAll writes nothing.
     const written = fbs.getWritten();
-    // The partial write means "\r" (1 byte) was written, then "\n" failed.
-    // Total = 16 bytes (buffer full).
-    try std.testing.expectEqual(@as(usize, 16), written.len);
+    try std.testing.expectEqual(@as(usize, 15), written.len);
 
-    // Verify the content up to byte 15 is clean
-    try std.testing.expectEqualStrings("\x1b[1A\r\x1b[J> ABCDE\r", written);
+    // Verify the content is clean
+    try std.testing.expectEqualStrings("\x1b[1A\r\x1b[J> ABCDE", written);
 }
 
 // ============================================================================

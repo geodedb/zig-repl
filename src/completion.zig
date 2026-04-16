@@ -10,6 +10,7 @@
 //! - Cycling through candidates
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const builtin = @import("builtin");
 const text_utils = @import("text_utils.zig");
 
@@ -181,7 +182,7 @@ fn getHomeDir() ?[]const u8 {
         const n = std.unicode.utf16LeToUtf8(&home_dir_buf, value_w) catch return null;
         return home_dir_buf[0..n];
     } else {
-        return std.posix.getenv("HOME");
+        return compat.getenvSlice("HOME");
     }
 }
 
@@ -241,12 +242,13 @@ pub fn generateFilePathCandidates(ctx: *CompletionContext, prefix: []const u8) !
     }
 
     // Open directory
-    var dir = std.fs.cwd().openDir(search_dir, .{ .iterate = true }) catch return;
-    defer dir.close();
+    const io = compat.defaultIo();
+    var dir = std.Io.Dir.cwd().openDir(io, search_dir, .{ .iterate = true }) catch return;
+    defer dir.close(io);
 
     // Iterate directory entries
     var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
+    while (iter.next(io) catch null) |entry| {
         // Skip hidden files unless prefix starts with .
         if (entry.name[0] == '.' and (file_prefix.len == 0 or file_prefix[0] != '.')) {
             continue;
@@ -360,20 +362,21 @@ test "file path candidates limited to MAX_FILE_CANDIDATES" {
     // Create a temporary directory with more files than the limit
     const tmp_dir_path = "/tmp/test_repl_completion_limit";
 
+    const tio = compat.defaultIo();
     // Clean up from any previous run
-    std.fs.cwd().deleteTree(tmp_dir_path) catch {};
+    std.Io.Dir.cwd().deleteTree(tio, tmp_dir_path) catch {};
 
     // Create the directory
-    std.fs.cwd().makePath(tmp_dir_path) catch return;
-    defer std.fs.cwd().deleteTree(tmp_dir_path) catch {};
+    std.Io.Dir.cwd().createDirPath(tio, tmp_dir_path) catch return;
+    defer std.Io.Dir.cwd().deleteTree(tio, tmp_dir_path) catch {};
 
     // Create MAX_FILE_CANDIDATES + 50 files (all starting with the same prefix)
     const num_files = MAX_FILE_CANDIDATES + 50;
     for (0..num_files) |i| {
         var name_buf: [128]u8 = undefined;
         const name = std.fmt.bufPrint(&name_buf, "{s}/file_{d:0>4}.txt", .{ tmp_dir_path, i }) catch continue;
-        const file = std.fs.cwd().createFile(name, .{}) catch continue;
-        file.close();
+        var file = std.Io.Dir.cwd().createFile(tio, name, .{ .truncate = true }) catch continue;
+        file.close(tio);
     }
 
     // Generate file path candidates for the temp directory
@@ -445,7 +448,7 @@ test "getHomeDir returns a non-null value on POSIX when HOME is set" {
 test "getHomeDir returns same value as std.posix.getenv HOME on POSIX" {
     if (builtin.os.tag != .windows) {
         const from_helper = getHomeDir();
-        const from_posix = std.posix.getenv("HOME");
+        const from_posix = compat.getenvSlice("HOME");
         if (from_posix) |expected| {
             try std.testing.expect(from_helper != null);
             try std.testing.expectEqualStrings(expected, from_helper.?);

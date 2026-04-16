@@ -30,6 +30,7 @@
 //! 3. Pass the `Options` to `Repl.run()`
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const builtin = @import("builtin");
 const text_utils = @import("text_utils.zig");
 const platform = @import("platform.zig");
@@ -101,13 +102,14 @@ pub const Config = struct {
         var config = Config{};
         config.colors_enabled = platform.shouldUseColor();
 
-        const file = std.fs.cwd().openFile(path, .{}) catch {
+        const cio = compat.defaultIo();
+        var file = std.Io.Dir.cwd().openFile(cio, path, .{}) catch {
             return config;
         };
-        defer file.close();
+        defer file.close(cio);
 
         // Parse simple key=value format
-        const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+        const content = try std.Io.Dir.cwd().readFileAlloc(cio, path, allocator, @enumFromInt(1024 * 1024));
         defer allocator.free(content);
 
         var lines = std.mem.tokenizeScalar(u8, content, '\n');
@@ -154,19 +156,20 @@ pub const Config = struct {
     /// signature to avoid a breaking API change when that functionality is added.
     pub fn saveToFile(self: *const Config, allocator: std.mem.Allocator, path: []const u8) !void {
         // Ensure directory exists
+        const cio = compat.defaultIo();
         const dir_path = std.fs.path.dirname(path) orelse ".";
-        try std.fs.cwd().makePath(dir_path);
+        try std.Io.Dir.cwd().createDirPath(cio, dir_path);
 
-        const file = try std.fs.cwd().createFile(path, .{ .mode = 0o600 });
-        defer file.close();
+        var file = try std.Io.Dir.cwd().createFile(cio, path, .{ .truncate = true });
+        defer file.close(cio);
 
-        // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
-        if (comptime std.fs.has_executable_bit) {
-            file.chmod(0o600) catch {};
+        // Enforce permissions on pre-existing files
+        if (comptime std.Io.File.Permissions.has_executable_bit) {
+            compat.chmod(file, 0o600) catch {};
         }
 
         var buf: [4096]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
+        var fbs: compat.FixedBufferStream = .init(&buf);
         const writer = fbs.writer();
 
         try writer.print("# REPL Configuration\n", .{});
@@ -178,7 +181,7 @@ pub const Config = struct {
         try writer.print("colors={s}\n", .{if (self.colors_enabled) "true" else "false"});
         try writer.print("max_history={d}\n", .{self.max_history});
 
-        try file.writeAll(fbs.getWritten());
+        try file.writeStreamingAll(cio, fbs.getWritten());
         _ = allocator;
     }
 };
@@ -201,12 +204,12 @@ pub fn getDefaultConfigPath(allocator: std.mem.Allocator, app_name: []const u8) 
 
     // Use platform-specific conventions
     if (builtin.os.tag == .windows) {
-        if (std.process.getEnvVarOwned(allocator, "APPDATA")) |appdata| {
+        if (compat.getEnvVarOwned(allocator, "APPDATA")) |appdata| {
             defer allocator.free(appdata);
             return std.fs.path.join(allocator, &[_][]const u8{ appdata, app_name, "config" });
         } else |_| {}
     } else if (builtin.os.tag == .macos) {
-        if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
+        if (compat.getEnvVarOwned(allocator, "HOME")) |home| {
             defer allocator.free(home);
             var filename_buf: [256]u8 = undefined;
             const filename = std.fmt.bufPrint(&filename_buf, "{s}.conf", .{app_name}) catch "repl.conf";
@@ -214,11 +217,11 @@ pub fn getDefaultConfigPath(allocator: std.mem.Allocator, app_name: []const u8) 
         } else |_| {}
     } else {
         // Linux/Unix - use XDG
-        if (std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME")) |xdg| {
+        if (compat.getEnvVarOwned(allocator, "XDG_CONFIG_HOME")) |xdg| {
             defer allocator.free(xdg);
             return std.fs.path.join(allocator, &[_][]const u8{ xdg, app_name, "config" });
         } else |_| {
-            if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
+            if (compat.getEnvVarOwned(allocator, "HOME")) |home| {
                 defer allocator.free(home);
                 return std.fs.path.join(allocator, &[_][]const u8{ home, ".config", app_name, "config" });
             } else |_| {}
@@ -256,13 +259,13 @@ test "format from string" {
 test "loadFromFile with valid config" {
     const allocator = std.testing.allocator;
     const path = "/tmp/test_repl_config_valid.conf";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Write a known config file
     {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
-        try file.writeAll(
+        const file = try std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true });
+        defer file.close(compat.defaultIo());
+        try file.writeStreamingAll(compat.defaultIo(),
             \\# Test config
             \\keymap=vi
             \\format=json
@@ -300,13 +303,13 @@ test "loadFromFile with missing file" {
 test "loadFromFile with malformed content" {
     const allocator = std.testing.allocator;
     const path = "/tmp/test_repl_config_malformed.conf";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Write lines without '=', empty lines, unknown keys
     {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
-        try file.writeAll(
+        const file = try std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true });
+        defer file.close(compat.defaultIo());
+        try file.writeStreamingAll(compat.defaultIo(),
             \\this line has no equals
             \\
             \\unknown_key=some_value
@@ -330,7 +333,7 @@ test "loadFromFile with malformed content" {
 test "saveToFile creates valid config" {
     const allocator = std.testing.allocator;
     const path = "/tmp/test_repl_config_save.conf";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     var config = Config{};
     config.keymap = .vi;
@@ -341,9 +344,9 @@ test "saveToFile creates valid config" {
     try config.saveToFile(allocator, path);
 
     // Read back the raw file content and verify expected key=value pairs
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const content = try file.readToEndAlloc(allocator, 1024 * 1024);
+    var file = std.Io.Dir.cwd().openFile(compat.defaultIo(), path, .{}) catch return;
+    defer file.close(compat.defaultIo());
+    const content = try compat.readToEndAlloc(file, allocator, 1024 * 1024);
     defer allocator.free(content);
 
     try std.testing.expect(std.mem.indexOf(u8, content, "keymap=vi") != null);
@@ -355,7 +358,7 @@ test "saveToFile creates valid config" {
 test "saveToFile and loadFromFile round-trip" {
     const allocator = std.testing.allocator;
     const path = "/tmp/test_repl_config_roundtrip.conf";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Save a non-default config
     var original = Config{};

@@ -15,10 +15,10 @@ const repl = @import("repl");
 
 pub fn main() !void {
     // Step 1: Set up the memory allocator
-    // GeneralPurposeAllocator is recommended for applications
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // DebugAllocator is recommended for applications
+    var da: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = da.deinit();
+    const allocator = da.allocator();
 
     // Step 2: Run the REPL with minimal configuration
     // Only the allocator and run_fn are required
@@ -33,7 +33,7 @@ pub fn main() !void {
 
 /// Welcome message displayed when the REPL starts.
 /// This runs BEFORE raw mode is enabled, so regular newlines work.
-fn printWelcome(stdout: std.fs.File, use_color: bool) !void {
+fn printWelcome(stdout: std.Io.File, use_color: bool) !void {
     const out = repl.TerminalWriter{ .file = stdout, .use_color = use_color };
 
     try out.writeBold("Basic REPL Example\n");

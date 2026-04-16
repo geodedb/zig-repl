@@ -16,9 +16,9 @@ const builtin = @import("builtin");
 const repl = @import("repl");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var da: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = da.deinit();
+    const allocator = da.allocator();
 
     try repl.Repl.run(.{
         .allocator = allocator,
@@ -29,7 +29,7 @@ pub fn main() !void {
     });
 }
 
-fn printWelcome(stdout: std.fs.File, use_color: bool) !void {
+fn printWelcome(stdout: std.Io.File, use_color: bool) !void {
     const out = repl.TerminalWriter{ .file = stdout, .use_color = use_color };
 
     try out.writeBold("Terminal Colors and Styling Example\n\n");
@@ -327,12 +327,13 @@ fn showColorStatus(out: repl.TerminalWriter) !void {
         }
         try out.write("  TERM:               (not applicable on Windows)\n");
     } else {
-        if (std.posix.getenv("NO_COLOR")) |_| {
+        if (std.c.getenv("NO_COLOR")) |_| {
             try out.write("  NO_COLOR:           set (colors disabled)\n");
         } else {
             try out.write("  NO_COLOR:           not set\n");
         }
-        if (std.posix.getenv("TERM")) |term| {
+        if (std.c.getenv("TERM")) |result| {
+            const term = std.mem.sliceTo(result, 0);
             try out.write("  TERM:               ");
             try out.writeLine(term);
         } else {

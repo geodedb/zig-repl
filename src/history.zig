@@ -11,6 +11,7 @@
 //! - Search functionality
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const builtin = @import("builtin");
 const text_utils = @import("text_utils.zig");
 
@@ -25,12 +26,12 @@ pub const HistoryStore = struct {
     /// so that the new entry appears only once, at the end. When false (the
     /// default), only consecutive duplicates are suppressed.
     deduplicate_global: bool = false,
-    file_mutex: std.Thread.Mutex = .{},
+    file_mutex: compat.Mutex = compat.Mutex.init,
     dir_ensured: bool = false,
     /// PF-004: Persistent file handle kept open for the lifetime of the store
     /// to avoid open/close overhead on every append. Lazily opened on first
     /// append; closed in deinit() and reset in clear().
-    append_handle: ?std.fs.File = null,
+    append_handle: ?std.Io.File = null,
 
     /// Initialize a new history store.
     ///
@@ -57,7 +58,7 @@ pub const HistoryStore = struct {
     pub fn deinit(self: *HistoryStore) void {
         // Close persistent append handle if open
         if (self.append_handle) |handle| {
-            handle.close();
+            handle.close(compat.defaultIo());
             self.append_handle = null;
         }
 
@@ -79,19 +80,20 @@ pub const HistoryStore = struct {
         self.file_mutex.lock();
         defer self.file_mutex.unlock();
 
-        const file = std.fs.cwd().openFile(self.path.?, .{}) catch |err| switch (err) {
+        var file = std.Io.Dir.cwd().openFile(compat.defaultIo(), self.path.?, .{}) catch |err| switch (err) {
             error.FileNotFound => return,
             else => return err,
         };
-        defer file.close();
+        defer file.close(compat.defaultIo());
 
         // Read entire file
-        const file_size = try file.getEndPos();
+        const hio = compat.defaultIo();
+        const file_size = try file.length(hio);
         const max_history_file_size: u64 = 64 * 1024 * 1024; // 64 MB
         if (file_size > max_history_file_size) return error.FileTooLarge;
         const content = try self.allocator.alloc(u8, @intCast(file_size));
         defer self.allocator.free(content);
-        _ = try file.readAll(content);
+        _ = try file.readPositionalAll(hio, content, 0);
 
         // Pre-allocate based on estimated line count to avoid geometric reallocs.
         // Average history line is ~40 bytes; cap at max_entries to avoid over-allocation.
@@ -183,33 +185,31 @@ pub const HistoryStore = struct {
                 // Ensure directory exists (once per session)
                 if (!self.dir_ensured) {
                     if (std.fs.path.dirname(path)) |dir| {
-                        std.fs.cwd().makePath(dir) catch {};
+                        std.Io.Dir.cwd().createDirPath(compat.defaultIo(), dir) catch {};
                     }
                     self.dir_ensured = true;
                 }
 
-                const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }) catch |err| {
+                const file = std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = false, .permissions = @enumFromInt(0o600) }) catch |err| {
                     // If we can't save history, just continue without persisting
                     if (err == error.FileNotFound) return;
                     return err;
                 };
 
-                // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
-                if (comptime std.fs.has_executable_bit) {
-                    file.chmod(0o600) catch {};
-                }
-
+                // Permissions are enforced via createFile options on creation.
+                // For pre-existing files, the OS-level permissions remain as-is.
                 self.append_handle = file;
             }
 
             const file = self.append_handle.?;
-            try file.seekFromEnd(0);
-            // Write line and newline in a single writev syscall (PF-032).
-            const iovecs = [_]std.posix.iovec_const{
-                .{ .base = line.ptr, .len = line.len },
-                .{ .base = "\n", .len = 1 },
-            };
-            _ = try file.writev(iovecs[0..]);
+            const aio = compat.defaultIo();
+            // Append at end of file
+            const end_pos = try file.length(aio);
+            const line_with_nl = try self.allocator.alloc(u8, line.len + 1);
+            defer self.allocator.free(line_with_nl);
+            @memcpy(line_with_nl[0..line.len], line);
+            line_with_nl[line.len] = '\n';
+            _ = try file.writePositionalAll(aio, line_with_nl, end_pos);
         }
     }
 
@@ -224,7 +224,7 @@ pub const HistoryStore = struct {
         // Close the persistent append handle before truncating the file;
         // it will be lazily reopened on the next append.
         if (self.append_handle) |handle| {
-            handle.close();
+            handle.close(compat.defaultIo());
             self.append_handle = null;
         }
 
@@ -235,19 +235,14 @@ pub const HistoryStore = struct {
 
             // Ensure directory exists
             if (std.fs.path.dirname(path)) |dir| {
-                std.fs.cwd().makePath(dir) catch {};
+                std.Io.Dir.cwd().createDirPath(compat.defaultIo(), dir) catch {};
             }
 
-            const file = std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 }) catch {
+            const file = std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true, .permissions = @enumFromInt(0o600) }) catch {
                 return;
             };
 
-            // Enforce 0o600 on pre-existing files (createFile mode only applies on creation)
-            if (comptime std.fs.has_executable_bit) {
-                file.chmod(0o600) catch {};
-            }
-
-            file.close();
+            file.close(compat.defaultIo());
         }
     }
 
@@ -307,7 +302,7 @@ pub fn getDefaultHistoryPath(allocator: std.mem.Allocator, app_name: []const u8)
     }
 
     // Primary: Try ~/.{app}_history as the default preference
-    if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
+    if (compat.getEnvVarOwned(allocator, "HOME")) |home| {
         defer allocator.free(home);
         var filename_buf: [256]u8 = undefined;
         const filename = std.fmt.bufPrint(&filename_buf, ".{s}_history", .{app_name}) catch ".repl_history";
@@ -316,22 +311,22 @@ pub fn getDefaultHistoryPath(allocator: std.mem.Allocator, app_name: []const u8)
 
     // Secondary: Use platform-specific conventions as fallback
     if (builtin.os.tag == .windows) {
-        if (std.process.getEnvVarOwned(allocator, "APPDATA")) |appdata| {
+        if (compat.getEnvVarOwned(allocator, "APPDATA")) |appdata| {
             defer allocator.free(appdata);
             return std.fs.path.join(allocator, &[_][]const u8{ appdata, app_name, "history" });
         } else |_| {}
     } else if (builtin.os.tag == .macos) {
-        if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
+        if (compat.getEnvVarOwned(allocator, "HOME")) |home| {
             defer allocator.free(home);
             return std.fs.path.join(allocator, &[_][]const u8{ home, "Library", "Application Support", app_name, "history" });
         } else |_| {}
     } else {
         // Linux/Unix - use XDG as secondary fallback
-        if (std.process.getEnvVarOwned(allocator, "XDG_DATA_HOME")) |xdg| {
+        if (compat.getEnvVarOwned(allocator, "XDG_DATA_HOME")) |xdg| {
             defer allocator.free(xdg);
             return std.fs.path.join(allocator, &[_][]const u8{ xdg, app_name, "history" });
         } else |_| {
-            if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
+            if (compat.getEnvVarOwned(allocator, "HOME")) |home| {
                 defer allocator.free(home);
                 return std.fs.path.join(allocator, &[_][]const u8{ home, ".local", "share", app_name, "history" });
             } else |_| {}
@@ -349,7 +344,7 @@ test "history leading-space suppression" {
 
     // Create temp file
     const path = "/tmp/test_repl_history.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     var hist = try HistoryStore.init(allocator, path, true);
     defer hist.deinit();
@@ -402,7 +397,7 @@ test "history persistence" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_persist.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Create and populate history
     {
@@ -431,16 +426,16 @@ test "history load trims excess entries from front in bulk" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_trim.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Write a history file with 10 lines
     {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true });
+        defer file.close(compat.defaultIo());
         for (0..10) |i| {
             var buf: [32]u8 = undefined;
             const line = std.fmt.bufPrint(&buf, "entry{d}\n", .{i}) catch unreachable;
-            try file.writeAll(line);
+            try file.writeStreamingAll(compat.defaultIo(), line);
         }
     }
 
@@ -462,7 +457,7 @@ test "history file permissions are 0o600" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_perms.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Append creates the file with restricted permissions
     {
@@ -472,9 +467,9 @@ test "history file permissions are 0o600" {
     }
 
     // Verify file permissions
-    const stat = try std.fs.cwd().statFile(path);
-    // On Linux, mode includes file type bits; mask to permission bits only
-    const perm_bits = stat.mode & 0o777;
+    const stat = try std.Io.Dir.cwd().statFile(compat.defaultIo(), path, .{});
+    // In 0.16.0, permissions is an enum; convert to mode_t for comparison
+    const perm_bits = stat.permissions.toMode() & 0o777;
     try std.testing.expect(perm_bits == 0o600);
 }
 
@@ -482,7 +477,7 @@ test "history clear file permissions are 0o600" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_clear_perms.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Create then clear
     {
@@ -493,8 +488,8 @@ test "history clear file permissions are 0o600" {
     }
 
     // Verify file permissions after clear
-    const stat = try std.fs.cwd().statFile(path);
-    const perm_bits = stat.mode & 0o777;
+    const stat = try std.Io.Dir.cwd().statFile(compat.defaultIo(), path, .{});
+    const perm_bits = stat.permissions.toMode() & 0o777;
     try std.testing.expect(perm_bits == 0o600);
 }
 
@@ -505,15 +500,14 @@ test "history load rejects file exceeding 64 MB" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_too_large.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Create a sparse file that appears to be > 64 MB
     {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true });
+        defer file.close(compat.defaultIo());
         const over_limit: u64 = 64 * 1024 * 1024 + 1;
-        try file.seekTo(over_limit - 1);
-        try file.writeAll("x");
+        _ = try file.writePositionalAll(compat.defaultIo(), "x", over_limit - 1);
     }
 
     {
@@ -529,7 +523,7 @@ test "history dir_ensured avoids redundant makePath" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_dir_ensured.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     var hist = try HistoryStore.init(allocator, path, true);
     defer hist.deinit();
@@ -605,7 +599,7 @@ test "history persistent handle: multiple appends persist correctly" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_persistent_handle.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     // Append several entries using the persistent handle
     {
@@ -637,7 +631,7 @@ test "history persistent handle: clear then append persists correctly" {
     const allocator = std.testing.allocator;
 
     const path = "/tmp/test_repl_history_persistent_clear.tmp";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(compat.defaultIo(), path) catch {};
 
     {
         var hist = try HistoryStore.init(allocator, path, true);

@@ -63,17 +63,14 @@ const COMMANDS = [_][]const u8{
 // Entry Point
 // =============================================================================
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     // Parse command-line arguments for keymap selection
     var keymap: repl.Keymap = .emacs;
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    for (args) |arg| {
+    var args = std.process.Args.Iterator.init(init.minimal.args);
+    _ = args.skip(); // skip argv[0]
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--vi") or std.mem.eql(u8, arg, "-v")) {
             keymap = .vi;
         }
@@ -109,7 +106,7 @@ pub fn main() !void {
 
 /// Print the welcome banner when the REPL starts.
 /// This runs BEFORE raw mode is enabled, so regular newlines work.
-fn printWelcome(stdout: std.fs.File, use_color: bool) !void {
+fn printWelcome(stdout: std.Io.File, use_color: bool) !void {
     const out = repl.TerminalWriter{ .file = stdout, .use_color = use_color };
 
     try out.write("\n");

@@ -8,6 +8,7 @@
 //! and displays matching history entries.
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const platform = @import("platform.zig");
 const text_utils = @import("text_utils.zig");
 const core = @import("core.zig");
@@ -20,7 +21,7 @@ const appendHistoryFiltered = text_utils.appendHistoryFiltered;
 /// ESC / Enter / Ctrl-C. On Ctrl-C the edit buffer is cleared.
 pub fn handleSearch(state: *core.ReplState) !void {
     const stdout = platform.getStdoutHandle();
-    try stdout.writeAll("\r\n(reverse-i-search)`': ");
+    try compat.writeAll(stdout, "\r\n(reverse-i-search)`': ");
 
     state.search_buffer.clearRetainingCapacity();
 
@@ -28,7 +29,7 @@ pub fn handleSearch(state: *core.ReplState) !void {
     var search_buf: [256]u8 = undefined;
 
     outer: while (true) {
-        const n = try stdin.read(&search_buf);
+        const n = try compat.read(stdin, &search_buf);
         if (n == 0) continue;
 
         // QF-082: Use index-based loop with getKeyEventLength to handle
@@ -99,7 +100,7 @@ pub fn handleSearch(state: *core.ReplState) !void {
         // contain raw \n which would move the cursor without a \r, causing
         // misaligned output. We modify only the display buffer, not state.buffer.
         const display_line = replaceNewlinesForDisplay(search_line);
-        try stdout.writeAll(display_line);
+        try compat.writeAll(stdout, display_line);
     }
 }
 

@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/repl.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     // Example executable demonstrating library usage
@@ -21,6 +22,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/example.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     example_exe.root_module.addImport("repl", repl_mod);
@@ -42,6 +44,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/repl.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     const run_lib_tests = b.addRunArtifact(lib_tests);
@@ -52,6 +55,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/integration.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
     integration_tests.root_module.addImport("repl", repl_mod);
@@ -103,6 +107,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path(example.file),
                 .target = target,
                 .optimize = optimize,
+                .link_libc = true,
             }),
         });
         exe.root_module.addImport("repl", repl_mod);

@@ -16,9 +16,9 @@ const std = @import("std");
 const repl = @import("repl");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var da: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = da.deinit();
+    const allocator = da.allocator();
 
     try repl.Repl.run(.{
         .allocator = allocator,
@@ -33,7 +33,7 @@ pub fn main() !void {
     });
 }
 
-fn printWelcome(stdout: std.fs.File, use_color: bool) !void {
+fn printWelcome(stdout: std.Io.File, use_color: bool) !void {
     const out = repl.TerminalWriter{ .file = stdout, .use_color = use_color };
 
     try out.writeBold("Command History Example\n\n");

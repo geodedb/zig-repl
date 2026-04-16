@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat.zig");
 
 // =============================================================================
 // Signal-based terminal cleanup (POSIX only)
@@ -40,7 +41,7 @@ var terminal_resized: bool = true; // true initially to force first fetch
 /// Async-signal-safety: only uses raw syscalls via `std.posix.system`
 /// (which resolves to `std.os.linux` or `std.c` depending on the
 /// target) and does not allocate or acquire locks.
-fn handleTerminalSignal(sig: i32) callconv(.c) void {
+fn handleTerminalSignal(sig: std.posix.SIG) callconv(.c) void {
     if (builtin.os.tag == .windows) return;
 
     const sys = std.posix.system;
@@ -62,13 +63,13 @@ fn handleTerminalSignal(sig: i32) callconv(.c) void {
         .mask = std.posix.sigemptyset(),
         .flags = 0,
     };
-    std.posix.sigaction(@intCast(sig), &default_sa, null);
+    std.posix.sigaction(sig, &default_sa, null);
     _ = sys.kill(sys.getpid(), sig);
 }
 
 /// SIGWINCH handler that sets the resize flag for cached width invalidation.
 /// Async-signal-safe: only sets a volatile boolean.
-fn handleResizeSignal(_: i32) callconv(.c) void {
+fn handleResizeSignal(_: std.posix.SIG) callconv(.c) void {
     terminal_resized = true;
 }
 
@@ -115,34 +116,34 @@ fn removeTerminalSignalHandlers() void {
 
 /// Get a handle to standard input.
 /// Works on both POSIX systems and Windows.
-pub fn getStdinHandle() std.fs.File {
+pub fn getStdinHandle() std.Io.File {
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch unreachable;
-        return std.fs.File{ .handle = handle };
+        return std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else {
-        return std.fs.File{ .handle = std.posix.STDIN_FILENO };
+        return std.Io.File.stdin();
     }
 }
 
 /// Get a handle to standard output.
 /// Works on both POSIX systems and Windows.
-pub fn getStdoutHandle() std.fs.File {
+pub fn getStdoutHandle() std.Io.File {
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE) catch unreachable;
-        return std.fs.File{ .handle = handle };
+        return std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else {
-        return std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+        return std.Io.File.stdout();
     }
 }
 
 /// Get a handle to standard error.
 /// Works on both POSIX systems and Windows.
-pub fn getStderrHandle() std.fs.File {
+pub fn getStderrHandle() std.Io.File {
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.GetStdHandle(std.os.windows.STD_ERROR_HANDLE) catch unreachable;
-        return std.fs.File{ .handle = handle };
+        return std.Io.File{ .handle = handle, .flags = .{ .nonblocking = false } };
     } else {
-        return std.fs.File{ .handle = std.posix.STDERR_FILENO };
+        return std.Io.File.stderr();
     }
 }
 
@@ -153,7 +154,7 @@ pub fn isStdinTty() bool {
         var mode: std.os.windows.DWORD = undefined;
         return std.os.windows.kernel32.GetConsoleMode(handle, &mode) != 0;
     } else {
-        return std.posix.isatty(std.posix.STDIN_FILENO);
+        return compat.isatty(std.posix.STDIN_FILENO);
     }
 }
 
@@ -164,7 +165,7 @@ pub fn isStdoutTty() bool {
         var mode: std.os.windows.DWORD = undefined;
         return std.os.windows.kernel32.GetConsoleMode(handle, &mode) != 0;
     } else {
-        return std.posix.isatty(std.posix.STDOUT_FILENO);
+        return compat.isatty(std.posix.STDOUT_FILENO);
     }
 }
 
@@ -175,7 +176,7 @@ pub fn isStderrTty() bool {
         var mode: std.os.windows.DWORD = undefined;
         return std.os.windows.kernel32.GetConsoleMode(handle, &mode) != 0;
     } else {
-        return std.posix.isatty(std.posix.STDERR_FILENO);
+        return compat.isatty(std.posix.STDERR_FILENO);
     }
 }
 
@@ -239,7 +240,7 @@ pub fn enterRawMode() !TerminalState {
 
     // Enable bracketed paste mode
     const stdout = getStdoutHandle();
-    try stdout.writeAll("\x1b[?2004h");
+    try compat.writeAll(stdout, "\x1b[?2004h");
 
     return original;
 }
@@ -248,7 +249,7 @@ pub fn enterRawMode() !TerminalState {
 pub fn restoreTerminalMode(original: TerminalState) !void {
     // Disable bracketed paste mode
     const stdout = getStdoutHandle();
-    stdout.writeAll("\x1b[?2004l") catch {};
+    compat.writeAll(stdout, "\x1b[?2004l") catch {};
 
     if (builtin.os.tag == .windows) {
         const handle = std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE) catch return;
@@ -394,10 +395,10 @@ pub fn shouldUseColor() bool {
         return isStdoutTty();
     } else {
         // POSIX: use the standard getenv for NO_COLOR and TERM.
-        if (std.posix.getenv("NO_COLOR")) |_| {
+        if (compat.getenvSlice("NO_COLOR")) |_| {
             return false;
         }
-        if (std.posix.getenv("TERM")) |term| {
+        if (compat.getenvSlice("TERM")) |term| {
             if (std.mem.eql(u8, term, "dumb")) {
                 return false;
             }
@@ -471,13 +472,13 @@ pub const Style = enum {
 /// Writer that converts \n to \r\n for raw terminal mode.
 /// Use this for all output when the terminal is in raw mode.
 pub const TerminalWriter = struct {
-    file: std.fs.File,
+    file: std.Io.File,
     use_color: bool,
 
     const Self = @This();
 
     /// Create a new terminal writer wrapping the given file handle.
-    pub fn init(file: std.fs.File) Self {
+    pub fn init(file: std.Io.File) Self {
         return .{ .file = file, .use_color = shouldUseColor() };
     }
 
@@ -504,7 +505,7 @@ pub const TerminalWriter = struct {
         for (data) |c| {
             if (c == '\n') {
                 if (pos + 2 > buf.len) {
-                    try self.file.writeAll(buf[0..pos]);
+                    try compat.writeAll(self.file, buf[0..pos]);
                     pos = 0;
                 }
                 buf[pos] = '\r';
@@ -512,20 +513,20 @@ pub const TerminalWriter = struct {
                 pos += 2;
             } else {
                 if (pos + 1 > buf.len) {
-                    try self.file.writeAll(buf[0..pos]);
+                    try compat.writeAll(self.file, buf[0..pos]);
                     pos = 0;
                 }
                 buf[pos] = c;
                 pos += 1;
             }
         }
-        if (pos > 0) try self.file.writeAll(buf[0..pos]);
+        if (pos > 0) try compat.writeAll(self.file, buf[0..pos]);
     }
 
     /// Write a string followed by a newline (converted to \r\n).
     pub fn writeLine(self: Self, data: []const u8) !void {
         try self.write(data);
-        try self.file.writeAll("\r\n");
+        try compat.writeAll(self.file, "\r\n");
     }
 
     /// Size of the stack buffer used by `print`. Extracted as a named constant
@@ -549,7 +550,7 @@ pub const TerminalWriter = struct {
     }
 
     /// Get the underlying file for direct access (bypasses \n conversion).
-    pub fn raw(self: Self) std.fs.File {
+    pub fn raw(self: Self) std.Io.File {
         return self.file;
     }
 
@@ -559,17 +560,17 @@ pub const TerminalWriter = struct {
 
     /// Clear the entire screen and move cursor to top-left.
     pub fn clearScreen(self: Self) !void {
-        try self.file.writeAll("\x1b[2J\x1b[H");
+        try compat.writeAll(self.file, "\x1b[2J\x1b[H");
     }
 
     /// Clear from cursor to end of screen.
     pub fn clearToEnd(self: Self) !void {
-        try self.file.writeAll("\x1b[J");
+        try compat.writeAll(self.file, "\x1b[J");
     }
 
     /// Clear the current line.
     pub fn clearLine(self: Self) !void {
-        try self.file.writeAll("\r\x1b[K");
+        try compat.writeAll(self.file, "\r\x1b[K");
     }
 
     // ========================================================================
@@ -583,7 +584,7 @@ pub const TerminalWriter = struct {
         if (self.use_color) {
             var buf: [16]u8 = undefined;
             const seq = std.fmt.bufPrint(&buf, "\x1b[{s}m", .{color.code()}) catch return;
-            try self.file.writeAll(seq);
+            try compat.writeAll(self.file, seq);
         }
     }
 
@@ -594,14 +595,14 @@ pub const TerminalWriter = struct {
         if (self.use_color) {
             var buf: [16]u8 = undefined;
             const seq = std.fmt.bufPrint(&buf, "\x1b[{s}m", .{style.code()}) catch return;
-            try self.file.writeAll(seq);
+            try compat.writeAll(self.file, seq);
         }
     }
 
     /// Reset all colors and styles to default.
     pub fn resetStyle(self: Self) !void {
         if (self.use_color) {
-            try self.file.writeAll("\x1b[0m");
+            try compat.writeAll(self.file, "\x1b[0m");
         }
     }
 
@@ -727,8 +728,8 @@ test "terminal writer newline conversion" {
 /// Helper: create a TerminalWriter backed by a temporary file for testing,
 /// then read back everything that was written. Color is disabled so that
 /// test assertions do not depend on the test runner's TTY status.
-fn createTestWriter() !struct { writer: TerminalWriter, tmp: std.fs.File } {
-    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-tw", .{
+fn createTestWriter() !struct { writer: TerminalWriter, tmp: std.Io.File } {
+    const tmp = try compat.cwdCreateFile("/tmp/zig-repl-test-tw", .{
         .read = true,
         .truncate = true,
     });
@@ -738,15 +739,22 @@ fn createTestWriter() !struct { writer: TerminalWriter, tmp: std.fs.File } {
     };
 }
 
-fn readBackTestOutput(file: std.fs.File, buf: []u8) ![]const u8 {
-    try file.seekTo(0);
-    const n = try file.readAll(buf);
+fn readBackTestOutputPath(path: []const u8, buf: []u8) ![]const u8 {
+    // Re-open the file for reading since createFile opens write-only in 0.16.0
+    const io = compat.defaultIo();
+    const rf = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer rf.close(io);
+    const n = try rf.readPositionalAll(io, buf, 0);
     return buf[0..n];
+}
+
+fn readBackTestOutput(_: std.Io.File, buf: []u8) ![]const u8 {
+    return readBackTestOutputPath("/tmp/zig-repl-test-tw", buf);
 }
 
 test "TerminalWriter.write converts newlines via buffered path" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     try ctx.writer.write("hello\nworld\n");
     var buf: [256]u8 = undefined;
@@ -756,7 +764,7 @@ test "TerminalWriter.write converts newlines via buffered path" {
 
 test "TerminalWriter.write handles empty input" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     try ctx.writer.write("");
     var buf: [256]u8 = undefined;
@@ -766,7 +774,7 @@ test "TerminalWriter.write handles empty input" {
 
 test "TerminalWriter.write handles data with no newlines" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     try ctx.writer.write("no newlines here");
     var buf: [256]u8 = undefined;
@@ -776,7 +784,7 @@ test "TerminalWriter.write handles data with no newlines" {
 
 test "TerminalWriter.write handles data larger than WRITE_BUF_SIZE" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     // Generate data larger than 8192 bytes with embedded newlines
     const size = TerminalWriter.WRITE_BUF_SIZE + 1000;
@@ -817,7 +825,7 @@ test "TerminalWriter.write handles data larger than WRITE_BUF_SIZE" {
 
 test "TerminalWriter.print writes formatted output" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     try ctx.writer.print("hello {s} {d}", .{ "world", 42 });
     var buf: [256]u8 = undefined;
@@ -827,7 +835,7 @@ test "TerminalWriter.print writes formatted output" {
 
 test "TerminalWriter.print writes partial buffer on overflow instead of dropping" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     // Build a format string argument larger than PRINT_BUF_SIZE (4096).
     // We pass a long string that will exceed the buffer.
@@ -848,38 +856,38 @@ test "TerminalWriter.print writes partial buffer on overflow instead of dropping
 
 test "TerminalWriter.setColor composes single ANSI sequence" {
     // Create a writer with color enabled to test setColor
-    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-color", .{
+    const tmp = try compat.cwdCreateFile("/tmp/zig-repl-test-color", .{
         .read = true,
         .truncate = true,
     });
-    defer tmp.close();
+    defer tmp.close(compat.defaultIo());
 
     const writer = TerminalWriter{ .file = tmp, .use_color = true };
     try writer.setColor(.red);
 
     var buf: [64]u8 = undefined;
-    const out = try readBackTestOutput(tmp, &buf);
+    const out = try readBackTestOutputPath("/tmp/zig-repl-test-color", &buf);
     try std.testing.expectEqualStrings("\x1b[31m", out);
 }
 
 test "TerminalWriter.setStyle composes single ANSI sequence" {
-    const tmp = try std.fs.cwd().createFile("/tmp/zig-repl-test-style", .{
+    const tmp = try compat.cwdCreateFile("/tmp/zig-repl-test-style", .{
         .read = true,
         .truncate = true,
     });
-    defer tmp.close();
+    defer tmp.close(compat.defaultIo());
 
     const writer = TerminalWriter{ .file = tmp, .use_color = true };
     try writer.setStyle(.bold);
 
     var buf: [64]u8 = undefined;
-    const out = try readBackTestOutput(tmp, &buf);
+    const out = try readBackTestOutputPath("/tmp/zig-repl-test-style", &buf);
     try std.testing.expectEqualStrings("\x1b[1m", out);
 }
 
 test "TerminalWriter.setColor is no-op when color disabled" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     // ctx.writer has use_color = false
     try ctx.writer.setColor(.red);
@@ -891,7 +899,7 @@ test "TerminalWriter.setColor is no-op when color disabled" {
 
 test "TerminalWriter.setStyle is no-op when color disabled" {
     const ctx = try createTestWriter();
-    defer ctx.tmp.close();
+    defer ctx.tmp.close(compat.defaultIo());
 
     try ctx.writer.setStyle(.bold);
 

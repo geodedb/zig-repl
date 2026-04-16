@@ -7,6 +7,7 @@
 //! config.zig to avoid duplicating common logic.
 
 const std = @import("std");
+const compat = @import("compat.zig");
 const builtin = @import("builtin");
 
 /// Find the start of the word at or before `pos`.
@@ -175,7 +176,7 @@ pub fn resolveEnvOverridePath(
     // Bounds check: combined "APPNAME_SUFFIX" must fit in full_env_name buffer
     if (env_name.len + 1 + env_suffix.len > full_env_name.len) return null;
     const full_name = std.fmt.bufPrint(&full_env_name, "{s}_{s}", .{ env_name, env_suffix }) catch return null;
-    if (std.process.getEnvVarOwned(allocator, full_name)) |path| {
+    if (compat.getEnvVarOwned(allocator, full_name)) |path| {
         if (isPathSafe(path)) {
             return path;
         }

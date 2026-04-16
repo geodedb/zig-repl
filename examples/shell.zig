@@ -23,16 +23,26 @@ const repl = @import("repl");
 const ShellContext = struct {
     allocator: std.mem.Allocator,
     cwd: []u8,
-    env: std.process.EnvMap,
+    env: std.process.Environ.Map,
     last_exit_code: u8 = 0,
 
     fn init(allocator: std.mem.Allocator) !ShellContext {
-        const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+        // In 0.16.0, use raw linux readlink syscall or fallback
+        const cwd = blk: {
+            if (builtin.os.tag == .linux) {
+                var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                const rc = std.os.linux.readlink("/proc/self/cwd", &path_buf, path_buf.len);
+                if (std.os.linux.errno(rc) != .SUCCESS) break :blk try allocator.dupe(u8, ".");
+                break :blk try allocator.dupe(u8, path_buf[0..rc]);
+            } else {
+                break :blk try allocator.dupe(u8, ".");
+            }
+        };
 
         return ShellContext{
             .allocator = allocator,
             .cwd = cwd,
-            .env = std.process.EnvMap.init(allocator),
+            .env = std.process.Environ.Map.init(allocator),
         };
     }
 
@@ -61,9 +71,9 @@ const BUILTINS = [_][]const u8{
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var da: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = da.deinit();
+    const allocator = da.allocator();
 
     var ctx = try ShellContext.init(allocator);
     defer ctx.deinit();
@@ -86,7 +96,7 @@ fn buildPrompt(_: *ShellContext) []const u8 {
     return "shell$ ";
 }
 
-fn printWelcome(stdout: std.fs.File, use_color: bool) !void {
+fn printWelcome(stdout: std.Io.File, use_color: bool) !void {
     const out = repl.TerminalWriter{ .file = stdout, .use_color = use_color };
 
     try out.writeBold("Simple Shell Example\n\n");
@@ -214,7 +224,7 @@ fn handleCommand(
     return true;
 }
 
-/// Cross-platform getenv helper. On POSIX uses std.posix.getenv; on Windows
+/// Cross-platform getenv helper. On POSIX uses libc getenv; on Windows
 /// converts the variable name at comptime and decodes the UTF-16 value into
 /// a module-level static buffer.
 fn crossGetenv(comptime name: []const u8) ?[]const u8 {
@@ -224,7 +234,8 @@ fn crossGetenv(comptime name: []const u8) ?[]const u8 {
         const n = std.unicode.utf16LeToUtf8(&shell_env_buf, value_w) catch return null;
         return shell_env_buf[0..n];
     } else {
-        return std.posix.getenv(name);
+        const result = std.c.getenv(name[0..name.len :0]) orelse return null;
+        return std.mem.sliceTo(result, 0);
     }
 }
 
@@ -261,17 +272,44 @@ fn changeDirectory(out: repl.TerminalWriter, ctx: *ShellContext, args: []const u
     }
 
     // Resolve the path
-    var dir = std.fs.cwd().openDir(target, .{}) catch |err| {
+    const sio = std.Io.Threaded.global_single_threaded.io();
+    var dir = std.Io.Dir.cwd().openDir(sio, target, .{}) catch |err| {
         try out.writeError(@errorName(err));
         ctx.last_exit_code = 1;
         return;
     };
-    defer dir.close();
+    defer dir.close(sio);
 
-    const real_path = dir.realpathAlloc(allocator, ".") catch |err| {
-        try out.writeError(@errorName(err));
-        ctx.last_exit_code = 1;
-        return;
+    // Get real path via /proc/self/fd on Linux, or just use target
+    const real_path = blk: {
+        if (builtin.os.tag == .linux) {
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            var fd_path_buf: [64:0]u8 = undefined;
+            const fd_path_slice = std.fmt.bufPrint(&fd_path_buf, "/proc/self/fd/{d}", .{dir.handle}) catch break :blk allocator.dupe(u8, target) catch |err| {
+                try out.writeError(@errorName(err));
+                ctx.last_exit_code = 1;
+                return;
+            };
+            fd_path_buf[fd_path_slice.len] = 0;
+            const fd_path_z: [*:0]const u8 = fd_path_buf[0..fd_path_slice.len :0];
+            const rc = std.os.linux.readlink(fd_path_z, &path_buf, path_buf.len);
+            if (std.os.linux.errno(rc) != .SUCCESS) break :blk allocator.dupe(u8, target) catch |err| {
+                try out.writeError(@errorName(err));
+                ctx.last_exit_code = 1;
+                return;
+            };
+            break :blk allocator.dupe(u8, path_buf[0..rc]) catch |err| {
+                try out.writeError(@errorName(err));
+                ctx.last_exit_code = 1;
+                return;
+            };
+        } else {
+            break :blk allocator.dupe(u8, target) catch |err| {
+                try out.writeError(@errorName(err));
+                ctx.last_exit_code = 1;
+                return;
+            };
+        }
     };
     defer allocator.free(real_path);
 
@@ -296,15 +334,16 @@ fn echoCommand(out: repl.TerminalWriter, args: []const u8, ctx: *ShellContext) !
                 if (ctx.env.get(var_name)) |value| {
                     try out.write(value);
                 } else {
-                    if (builtin.os.tag == .windows) {
-                        // On Windows, use the allocating cross-platform API.
-                        if (std.process.getEnvVarOwned(std.heap.page_allocator, var_name)) |value| {
-                            defer std.heap.page_allocator.free(value);
-                            try out.write(value);
-                        } else |_| {}
-                    } else {
-                        if (std.posix.getenv(var_name)) |value| {
-                            try out.write(value);
+                    // Look up system env using libc getenv
+                    if (var_name.len < 255) {
+                        var env_buf: [256]u8 = undefined;
+                        @memcpy(env_buf[0..var_name.len], var_name);
+                        env_buf[var_name.len] = 0;
+                        const name_z: [*:0]const u8 = env_buf[0..var_name.len :0];
+                        if (builtin.os.tag != .windows) {
+                            if (std.c.getenv(name_z)) |result| {
+                                try out.write(std.mem.sliceTo(result, 0));
+                            }
                         }
                     }
                 }

@@ -263,10 +263,10 @@ test "hasBackslashContinuation" {
 
 test "fuzz isBalanced" {
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) anyerror!void {
-            // isBalanced must handle any input without crashing.
-            // The result (true/false) is valid for any byte sequence.
-            _ = isBalanced(input);
+        fn testOne(_: void, smith: *std.testing.Smith) anyerror!void {
+            var buf: [128]u8 = undefined;
+            smith.bytesWithHash(&buf, 0);
+            _ = isBalanced(&buf);
         }
     }.testOne, .{
         .corpus = &.{
@@ -286,9 +286,10 @@ test "fuzz isBalanced" {
 
 test "fuzz isComplete" {
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) anyerror!void {
-            // isComplete must handle any input without crashing.
-            _ = isComplete(input);
+        fn testOne(_: void, smith: *std.testing.Smith) anyerror!void {
+            var buf: [128]u8 = undefined;
+            smith.bytesWithHash(&buf, 0);
+            _ = isComplete(&buf);
         }
     }.testOne, .{
         .corpus = &.{
@@ -304,9 +305,10 @@ test "fuzz isComplete" {
 
 test "fuzz needsContinuation" {
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) anyerror!void {
-            // needsContinuation must handle any input without crashing.
-            _ = needsContinuation(input);
+        fn testOne(_: void, smith: *std.testing.Smith) anyerror!void {
+            var buf: [128]u8 = undefined;
+            smith.bytesWithHash(&buf, 0);
+            _ = needsContinuation(&buf);
         }
     }.testOne, .{
         .corpus = &.{

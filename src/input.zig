@@ -531,11 +531,13 @@ test "getKeyEventLength ESC O without third byte is 2 bytes" {
 
 test "fuzz parseKeyEvent" {
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) anyerror!void {
+        fn testOne(_: void, smith: *std.testing.Smith) anyerror!void {
+            var buf: [64]u8 = undefined;
+            smith.bytesWithHash(&buf, 0);
+            const input = buf[0..@min(buf.len, 16)];
             // parseKeyEvent must handle any non-empty input without crashing.
-            // Empty input returns error.NoInput which is expected, not a crash.
             if (input.len == 0) return;
-            _ = try parseKeyEvent(input);
+            _ = parseKeyEvent(input) catch {};
         }
     }.testOne, .{
         .corpus = &.{
@@ -555,7 +557,10 @@ test "fuzz parseKeyEvent" {
 
 test "fuzz getKeyEventLength" {
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) anyerror!void {
+        fn testOne(_: void, smith: *std.testing.Smith) anyerror!void {
+            var buf: [64]u8 = undefined;
+            smith.bytesWithHash(&buf, 0);
+            const input = buf[0..@min(buf.len, 16)];
             // getKeyEventLength must handle any input without crashing and
             // must return a value <= input.len (or 0 for empty input).
             const len = getKeyEventLength(input);
