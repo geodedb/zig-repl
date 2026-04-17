@@ -20,7 +20,7 @@ include:
   - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.7.1
 
 variables:
-  ZIG_VERSION: "0.15.2"
+  ZIG_VERSION: "0.16.0"
   # Pinned SHA-256 hashes for Zig binary tarballs (SF-020: independent trust root).
   # These are verified from the git repository, not fetched from the download origin.
   # When updating ZIG_VERSION, update these hashes from https://ziglang.org/download/
