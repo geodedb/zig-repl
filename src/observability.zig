@@ -139,7 +139,6 @@ pub fn startEvalSpan() Span {
 /// status writes). Callers typically pair this with `defer span.end(null)`.
 pub fn endEvalSpan(span: Span, ok: bool, error_kind: []const u8) void {
     if (!enabled) return;
-    span.setBoolAttribute("repl.eval.ok", ok) catch {};
     if (!ok) {
         span.setStringAttribute("repl.eval.error_kind", error_kind) catch {};
     }
