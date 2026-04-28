@@ -21,6 +21,7 @@ const text_utils = @import("text_utils.zig");
 const render = @import("render.zig");
 const input_mod = @import("input.zig");
 const undo_mod = @import("undo.zig");
+const observability = @import("observability");
 
 const findWordStart = text_utils.findWordStart;
 const findWordEnd = text_utils.findWordEnd;
@@ -558,13 +559,27 @@ fn handleCommandSubmission(state: *ReplState) !void {
         try compat.writeAll(stdout, "\r\n");
 
         if (state.run_fn) |handler| {
+            // One span per eval cycle. PII INVARIANT: do NOT pass
+            // `complete_input` (the raw user-typed line) to the seam —
+            // REPL inputs may carry passwords, tokens, or file paths.
+            // The seam itself accepts no input strings; the only string
+            // we ever attach is `error_kind`, a bounded-cardinality
+            // category label.
+            const span = observability.startEvalSpan();
+            var ok: bool = true;
+            var error_kind: []const u8 = "ok";
             const should_continue = handler(state.user_context, state.allocator, complete_input, state.history) catch |err| blk: {
+                ok = false;
+                // The handler error name is bounded by the consumer's
+                // declared error set; safe to use as a category label.
+                error_kind = @errorName(err);
                 const stderr = platform.getStderrHandle();
                 compat.writeAll(stderr, "Error: ") catch {};
                 compat.writeAll(stderr, @errorName(err)) catch {};
                 compat.writeAll(stderr, "\r\n") catch {};
                 break :blk true;
             };
+            observability.endEvalSpan(span, ok, error_kind);
             if (!should_continue) state.quit_requested = true;
         }
 
