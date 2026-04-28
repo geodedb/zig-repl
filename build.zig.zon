@@ -11,5 +11,16 @@
         "README.md",
         "LICENSE",
     },
-    .dependencies = .{},
+    .dependencies = .{
+        // Otel observability dep. Lazy: only fetched when the build
+        // reaches `b.lazyDependency("otel", ...)` under `-Dwith_otel=true`.
+        // With the flag off the dependency is never resolved and the
+        // produced artifact contains zero otel symbols (verified by
+        // otel/scripts/verify-consumer-noop.sh).
+        .otel = .{
+            .url = "git+https://gitlab.com/devnw/zig/otel#20078af231c069d88eaeb79dcf950b94366be624",
+            .hash = "otel-0.1.0-B0v3lsl9MwCHrG8GDrxdFebugqjybfr4KAiplOJKCRG7",
+            .lazy = true,
+        },
+    },
 }
