@@ -355,6 +355,70 @@ zig build test
 zig fmt --check src/ tests/ examples/ build.zig
 ```
 
+## Observability
+
+This library ships an optional OpenTelemetry seam, gated behind
+`-Dwith_otel=<bool>` (default `false`).
+
+When `-Dwith_otel=false` (the default) the seam collapses to a
+comptime-known no-op: every public helper in `repl.observability`
+returns a zero-sized `Span{}`, the otel dependency is never resolved,
+and the produced artifact contains zero otel symbols (verified by
+`otel/scripts/verify-consumer-noop.sh`).
+
+When `-Dwith_otel=true`, every accepted REPL line emits **one
+internal-kind span per eval cycle**. Each span is named `"repl.eval"`
+and reports outcome via `setStatus(.ok | .@"error", "")`. On failure,
+a bounded-cardinality `repl.eval.error_kind` attribute is attached
+carrying the handler's error name (e.g. `"OutOfMemory"`,
+`"InvalidInput"`) -- never the error message body.
+
+**PII INVARIANT:** the raw user-typed input is *never* attached as a
+span attribute. REPL inputs may contain passwords, tokens, file paths,
+or other sensitive data, so the seam refuses to accept user-supplied
+strings on its public surface. Operators who want richer telemetry on
+specific commands (where the command vocabulary is fixed and bounded)
+can attach their own attributes via the underlying
+`otel.api.trace.Span.setStringAttribute` after the seam returns.
+
+Bootstrap from your application entry point:
+
+```zig
+const std = @import("std");
+const repl = @import("repl");
+
+pub fn main() !void {
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
+
+    var otel = try repl.observability_init.Otel.init(gpa.allocator(), "my-repl");
+    otel.installGlobals();
+    defer otel.deinit();
+
+    try repl.Repl.run(.{
+        .allocator = gpa.allocator(),
+        .prompt = ">>> ",
+        .run_fn = runCommand, // each accepted line emits one "repl.eval" span
+    });
+}
+```
+
+Configuration follows the OpenTelemetry environment-variable contract
+(`OTEL_SERVICE_NAME`, `OTEL_TRACES_SAMPLER`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
+etc). Defaults: `parentbased_traceidratio` @ 5%, OTLP/HTTP to
+`http://localhost:4318`.
+
+Verification gates (all three must pass):
+
+```bash
+zig build test                                              # default flag = false
+zig build test -Dwith_otel=true                             # flag on
+otel/scripts/verify-consumer-noop.sh --worktree <name> repl # symbol-leak check
+```
+
+See [otel/docs/integration/RECIPE.md](https://gitlab.com/devnw/zig/otel/-/blob/main/docs/integration/RECIPE.md)
+for the full recipe.
+
 ## Roadmap
 
 Development is tracked through GitLab issues organized into milestones:
