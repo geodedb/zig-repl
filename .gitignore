@@ -34,3 +34,6 @@ Thumbs.db
 *.tmp
 *.log
 /tmp/
+
+# Local git worktrees (per-feature isolated checkouts)
+.worktrees/
