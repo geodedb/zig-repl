@@ -17,6 +17,33 @@ pub fn build(b: *std.Build) void {
         "Compile in otel instrumentation (off by default; zero overhead when off)",
     ) orelse false;
 
+    // Forward otel build options so the upstream package is configured
+    // identically across all consumers in the build graph. Without this,
+    // each consumer's `b.lazyDependency("otel", ...)` materialises a
+    // DISTINCT otel Module instance (different `build_options` ⇒ different
+    // package keys), and zig 0.16 errors with `file exists in modules
+    // 'otel' and 'otel0'` when transitive imports overlap.
+    const otel_use_devnw_tls = b.option(
+        bool,
+        "otel_use_devnw_tls",
+        "Forward to upstream otel: HTTPS via DevNW tls",
+    ) orelse false;
+    const otel_disabled = b.option(
+        bool,
+        "otel_disabled",
+        "Forward to upstream otel: comptime-disable",
+    ) orelse false;
+    const otel_profiles = b.option(
+        bool,
+        "otel_profiles",
+        "Forward to upstream otel: experimental profiles",
+    ) orelse false;
+    const otel_use_devnw_grpc = b.option(
+        bool,
+        "otel_use_devnw_grpc",
+        "Forward to upstream otel: DevNW gRPC",
+    ) orelse false;
+
     // Build options module — materialise ONE shared `build_options`
     // module so every consumer (lib, observability seam, tests) imports
     // the SAME instance. Without the shared instance Zig 0.16 may emit
@@ -156,6 +183,10 @@ pub fn build(b: *std.Build) void {
         const otel_dep = b.lazyDependency("otel", .{
             .target = target,
             .optimize = optimize,
+            .otel_use_devnw_tls = otel_use_devnw_tls,
+            .otel_disabled = otel_disabled,
+            .otel_profiles = otel_profiles,
+            .otel_use_devnw_grpc = otel_use_devnw_grpc,
         }) orelse return;
         const otel_module = otel_dep.module("otel");
         // The seam itself imports `otel` when enabled. Wire it onto the
