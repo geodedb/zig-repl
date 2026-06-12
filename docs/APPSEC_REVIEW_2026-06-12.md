@@ -8,6 +8,11 @@
 **Frameworks:** OWASP Top 10:2025, CIS Controls v8.1.2
 **Classification:** INTERNAL — do not distribute outside the project team
 
+> **Remediation update (2026-06-12, verified @ `9b0085d` / v0.1.9):** All six findings below were
+> dispositioned the same day. NEW-001/002/005 resolved in `ec9a1dc`, NEW-003 resolved in `5eae04d`,
+> NEW-006 resolved in `cf50500`, NEW-004 refuted / Won't Do (#125). See §8 for per-finding
+> verification evidence and residual open items.
+
 ---
 
 ## 1. Scope & Assumptions
@@ -42,14 +47,14 @@ Overall confidence: High on NEW-001 (reproduced) and NEW-002/004/005/006 (direct
 
 ## 3. Findings Table
 
-| ID | Severity | Confidence | Title | OWASP 2025 / CIS | Location |
-|----|----------|------------|-------|------------------|----------|
-| NEW-001 | High | High | Config files written world-readable (no-op chmod + missing `.permissions`) | A04 Cryptographic Failures / A01* ; CIS 3.3 | `src/compat.zig:66-72`, `src/config.zig:163-169` |
-| NEW-002 | Medium | High | History permission enforcement on pre-existing files removed (SF-022/SF-024 regression) | A01 Broken Access Control / CIS 3.3 | `src/history.zig:193-201`, `src/history.zig:241-245` |
-| NEW-003 | Medium | Medium | `sync_diamond_deps.py --cascade --apply` pushes to all sibling remotes + `rm -rf` from untrusted-ish input, no integrity check/confirmation | A03 Software Supply Chain Failures / A08 ; CIS 16.4, 2.4 | `scripts/sync_diamond_deps.py:360-521,265-271` |
-| NEW-004 | Low | High | `build.zig.zon` otel pin: url `ref=v0.1.8` vs hash label `otel-0.1.7-…` drift | A08 Data Integrity / CIS 2.1 | `build.zig.zon:21-22` |
-| NEW-005 | Low | High | `compat.chmod` is a silent no-op that defeats callers relying on it (latent control failure) | A09 Logging/Alerting (silent failure) / CIS 16 | `src/compat.zig:66-72` |
-| NEW-006 | Info | High | Observability seam hardcoded `enabled=false`; otel feature inert under `-Dwith_otel` | N/A (correctness) | `src/observability.zig:43` |
+| ID | Severity | Confidence | Title | OWASP 2025 / CIS | Location | Status (v0.1.9) |
+|----|----------|------------|-------|------------------|----------|-----------------|
+| NEW-001 | High | High | Config files written world-readable (no-op chmod + missing `.permissions`) | A04 Cryptographic Failures / A01* ; CIS 3.3 | `src/compat.zig:66-72`, `src/config.zig:163-169` | **Resolved** (`ec9a1dc`, #122) |
+| NEW-002 | Medium | High | History permission enforcement on pre-existing files removed (SF-022/SF-024 regression) | A01 Broken Access Control / CIS 3.3 | `src/history.zig:193-201`, `src/history.zig:241-245` | **Resolved** (`ec9a1dc`, #123) |
+| NEW-003 | Medium | Medium | `sync_diamond_deps.py --cascade --apply` pushes to all sibling remotes + `rm -rf` from untrusted-ish input, no integrity check/confirmation | A03 Software Supply Chain Failures / A08 ; CIS 16.4, 2.4 | `scripts/sync_diamond_deps.py:360-521,265-271` | **Resolved** (`5eae04d`, #124) |
+| NEW-004 | Low | High | `build.zig.zon` otel pin: url `ref=v0.1.8` vs hash label `otel-0.1.7-…` drift | A08 Data Integrity / CIS 2.1 | `build.zig.zon:21-22` | **Refuted / Won't Do** (#125) |
+| NEW-005 | Low | High | `compat.chmod` is a silent no-op that defeats callers relying on it (latent control failure) | A09 Logging/Alerting (silent failure) / CIS 16 | `src/compat.zig:66-72` | **Resolved** (`ec9a1dc`, #126) |
+| NEW-006 | Info | High | Observability seam hardcoded `enabled=false`; otel feature inert under `-Dwith_otel` | N/A (correctness) | `src/observability.zig:43` | **Resolved** (`cf50500`, #127/#140) |
 
 \* NEW-001 maps primarily to A04 (sensitive data at rest left unprotected) with a Broken-Access-Control flavor; CWE-732.
 
@@ -255,3 +260,59 @@ The URL `ref` says **v0.1.8** while the Zig package hash label is **otel-0.1.7-�
 7. **Process.** Add the missing permission tests to the suite so a future migration cannot silently regress SF-001/022/023/024 again, and re-verify resolved controls against *current* source (not stale line numbers) in the next cycle.
 
 *No secrets, no RCE, no auth bypass, no remotely-exploitable runtime vulnerability found. The dominant theme this cycle is a permission-hardening regression introduced by the Zig 0.16 compatibility migration, plus a high-blast-radius maintainer supply-chain tool.*
+
+---
+
+## 8. Remediation Status — verified 2026-06-12 against `9b0085d` (v0.1.9)
+
+The fixes pushed after this review was written were independently re-verified against current source. Every claim below cites the post-fix code.
+
+### NEW-001 — RESOLVED (`ec9a1dc`, issue #122)
+
+- `compat.chmod` is now a real implementation: `src/compat.zig:54-60` calls `file.setPermissions(defaultIo(), std.Io.File.Permissions.fromMode(mode))` (Windows is an explicit, documented no-op since there are no POSIX bits).
+- `Config.saveToFile` now writes atomically via a temp file created with `.permissions = @enumFromInt(0o600)` (`src/config.zig:189-191`), re-tightens pre-existing temp files via the now-working `compat.chmod` (`:195-199`), then renames over the target — so a pre-existing world-readable config is replaced, not inherited.
+- Regression test added: "saveToFile creates config with 0o600 permissions" (`src/config.zig:410-426`) asserts `stat.permissions.toMode() & 0o777 == 0o600`.
+
+### NEW-002 — RESOLVED (`ec9a1dc`, issue #123)
+
+- Both the append path (`src/history.zig:199-203`) and the clear path (`:250-253`) now call `compat.chmod(file, 0o600)` after `createFile` specifically to re-tighten **pre-existing** files, with comments documenting the intent.
+- Regression tests added that pre-create the history file at `0o644` and assert `0o600` after append and after clear (`src/history.zig:496-551`, plus the existing fresh-file tests at `:467-484`, `:553-570`).
+
+### NEW-003 — RESOLVED (`5eae04d`, issue #124)
+
+- `--cascade --apply` now requires an explicit repo allowlist (`--repos`/`--all-discovered`; non-allowlisted repos are SKIPPED — `scripts/sync_diamond_deps.py:41-54`, `normalize_allowlist`/`repo_allowed` at `:437-461`).
+- Interactive confirmation gate: the operator must type the `APPLY` token after being shown the full blast radius incl. each repo's origin URL (`:94-95`, `:167`); a documented env var exists only for CI automation bypass.
+- Target integrity: the tool now verifies the target tag's signature, and failing a valid signature, confirms the tag object resolves to the claimed commit (`:471-495`).
+
+### NEW-004 — REFUTED / WON'T DO (issue #125)
+
+`build.zig.zon:21-22` still reads `ref=v0.1.8` with hash label `otel-0.1.7-…` — unchanged, by decision: the hash label embeds the *package manifest's* `.version` field at the pinned commit, which legitimately lags the git tag; `zig fetch` regenerating the same triple confirms there is no integrity drift. Dispositioned Won't Do in `docs/SECURITY_GAP_ANALYSIS.md` Rev 15.
+
+### NEW-005 — RESOLVED (`ec9a1dc`, issue #126)
+
+`compat.chmod` is no longer a stub (see NEW-001 evidence). No caller is misled; the `catch {}` call sites now invoke a real permission change.
+
+### NEW-006 — RESOLVED (`cf50500`, issues #127/#140)
+
+`src/observability.zig:48` is restored to `pub const enabled: bool = build_options.with_otel;` (comment at `:42` records the 2026-06-12 restoration and the dedup workaround it replaces). `-Dwith_otel=true` is functional again.
+
+### Related hardening landed in the same push (not findings of this review, verified anyway)
+
+- **Bracketed-paste state now persists across `read()` boundaries** (`d039c05`): `paste_buf`/`paste_len` are threaded by pointer and survive loop iterations; a `carryOverSplit` helper handles markers split across reads; a safety bound caps how many reads `in_bracketed_paste` may span (`src/core.zig:43`, `:485-503`, `:740-757`). Closes tracked issue #142 / ADV-001.
+- **Lazy undo snapshots** (`d039c05`): pure cursor moves no longer dupe+free the whole buffer per keystroke (`src/core.zig:526-547`, test "perf NEW-1: pure cursor moves perform zero buffer dupes" at `:2207`).
+- **CI base image digest-pinned** (`cf50500`): `DEBIAN_IMAGE: "debian:bookworm-slim@sha256:96e378d7…"` (`.gitlab-ci.yml:34`). Closes #133.
+- **Version single-sourcing** (`cf50500`): `repl.zig:263-272` derives `version`/`version_major/minor/patch` from `build.zig.zon` via build options — the manifest is the single source of truth (now `0.1.9`).
+
+### Residual items still open at v0.1.9 (from this cycle's parallel deep review)
+
+These were found by the concurrent full-repo appsec pass and adversarial review this same day and are **not** fixed by the commits above:
+
+| Item | Severity | Location (v0.1.9) | Summary |
+|------|----------|--------------------|---------|
+| C1 control-byte bypass | Low–Medium (terminal-dependent) | `src/text_utils.zig:221-226`, `renderPrompt` content loop, search display | `isUnsafeControlChar` filters only C0+DEL; 8-bit C1 controls (0x9B CSI, 0x9D OSC, 0x9C ST, 0x90 DCS) pass all three display/ingest boundaries verbatim → escape injection on C1-honoring terminals (re-opens the SF-009/SF-013 class via the 8-bit channel) |
+| 8-bit paste-marker bypass | Low–Medium (terminal-dependent) | `src/text_utils.zig` `sanitizePasteContent` | Strips only the canonical 6-byte `ESC[200~/201~`; 8-bit `\x9b201~` and parameter-padded `ESC[0201~` variants are not stripped → pastejacking residual (the new `carryOverSplit` fixes *split canonical* markers only) |
+| `appendAssumeCapacity` invariant | Low (latent) | `src/text_utils.zig:235` | Safe only while the history filter never expands output; must be revisited if the C1 fix adopts an expanding transform (replacement glyphs) |
+| `enterRawMode` partial-failure cleanup | Low | `src/platform.zig:234-243` | `tcsetattr(raw)` + `saved_termios` + signal handlers are committed before `try writeAll("\x1b[?2004h")`; if that write fails the error returns before the caller's `defer restoreTerminalMode` registers — terminal left raw on a clean error return (CWE-460). Needs an `errdefer` restore inside `enterRawMode` |
+| `i32` bracket-depth counters | Info (theoretical) | `src/parse.zig:37-39` | Unchanged; wrap/trap requires ~2 GB single-slice input — matches the existing MF-004 disposition |
+
+**Bottom line post-verification:** every finding of this review is closed or consciously dispositioned; the test suite passes (`zig build test`, 318+ tests, Debug/ReleaseSafe/ReleaseFast). The residual table above is the open security work for the next cycle.
