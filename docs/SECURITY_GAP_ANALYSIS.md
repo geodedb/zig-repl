@@ -1,15 +1,58 @@
 # Security Gap Analysis
 
 **Project:** devnw/zig/repl -- Zig REPL Library
-**Date:** 2026-03-25 (Audit Cycle 2, Phase 4)
-**Auditor:** Security Reviewer (automated + manual code review)
-**Scope:** Full source tree at commit `f8eab0c` (branch: main)
+**Date:** 2026-06-12 (Audit Cycle 3, Gap Closure)
+**Auditor:** Security Reviewer (automated + manual code review) + AppSec code review (defensive, evidence-first)
+**Scope:** Full source tree at commit `577adef` (Audit Cycle 3); historical findings audited at `f8eab0c`
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 14 (Gap Closure -- SF-028 resolved; SF-026, SF-027 marked Won't Do; 0 open findings)
+**Revision:** 15 (Audit Cycle 3 -- 6 new appsec findings + 1 adversarial finding; 6 resolved, 1 refuted/Won't Do; 0 open findings)
 
 ---
 
 ## Overall Assessment
+
+**No open findings. 37 total findings tracked (SF-001..SF-030 + NEW-001..NEW-006 + ADV-001).**
+
+**Audit Cycle 3 (2026-06-12) -- see "Revision 15" section below.** Today's defensive appsec
+review (`docs/APPSEC_REVIEW_2026-06-12.md`) plus an adversarial review identified 7 new
+findings, all now resolved or dispositioned on branch `audit-cycle-3-gap-closure`:
+
+- **NEW-001 (High, #122):** Config files written world-readable -- the Zig 0.16 migration turned
+  `compat.chmod` into a no-op and dropped the `.permissions` arg from `Config.saveToFile`,
+  regressing SF-001/SF-023. **RESOLVED** in `ec9a1dc`: atomic temp-file write with
+  `.permissions=0o600` + rename; regression test added.
+- **NEW-002 (Medium, #123):** History pre-existing-file permission enforcement removed,
+  regressing SF-022/SF-024. **RESOLVED** in `ec9a1dc`: `append`/`clear` re-apply
+  `compat.chmod(file, 0o600)` after open; pre-create-0o644 -> assert-0o600 tests added.
+- **NEW-003 (Medium, #124):** `sync_diamond_deps.py --cascade --apply` high-blast-radius
+  multi-repo push + `rm -rf`, no integrity check/confirmation. **RESOLVED** in `5eae04d`:
+  typed-token confirmation gate, `--allow-repo` allowlist, target integrity (`git tag -v` +
+  tag->commit binding), guarded `shutil.rmtree`, opt-in parent-dir discovery with blast-radius
+  logging.
+- **NEW-004 (Low, #125):** otel pin label/version drift. **REFUTED / Won't Do** -- `zig fetch`
+  returns a hash exactly matching `build.zig.zon`; the `otel-0.1.7` label is the dependency's
+  internal `.version` (Zig content-hash convention) while `ref=v0.1.8` is the git tag. No
+  integrity issue.
+- **NEW-005 (Low, #126):** `compat.chmod` silent no-op (root cause of NEW-001/002).
+  **RESOLVED** in `ec9a1dc`: implemented against Zig 0.16 `std.Io.File.setPermissions` (POSIX);
+  documented no-op only on Windows; unit test asserts the mode change.
+- **NEW-006 (Info, #127):** observability seam hardcoded `enabled=false`, making `-Dwith_otel`
+  inert. **RESOLVED** in `cf50500`: restored `pub const enabled = build_options.with_otel`;
+  `-Dwith_otel=true` now compiles and emits spans; CI `test-with-otel` job added. (Companion
+  build-wiring issue #140 also resolved.)
+- **ADV-001 (Medium, #142):** bracketed-paste state reset per `read()` caused multi-read paste
+  data loss and a torn-marker REPL wedge. **RESOLVED** in `d039c05`: paste state hoisted to
+  persist across reads; torn start/end marker carry-over; paste-mode safety bound (force-exit)
+  prevents the wedge; 6 paste tests added.
+
+This cycle resolved 6 findings and refuted 1, with no findings left open. Of note: ADV-001's fix
+breaks-then-restores the SF-005/SF-015/SF-016 certifications -- and SF-015's prior Won't-Do
+rationale ("terminal emulators deliver paste markers atomically") is now **superseded as
+incorrect**, since multi-read paste fragmentation was demonstrated and handled.
+
+---
+
+### Audit Cycle 2 Assessment (Revision 14)
 
 **No Critical or High severity findings. 0 open findings. 30 total SF-IDs tracked.**
 
@@ -21,6 +64,7 @@ have been resolved** (23 unique root causes; SF-002 reclassified as SF-014), wit
 Audit Cycle 2, Phase 4 (2026-03-25) performed a comprehensive re-review of all 3 open Low
 findings and all 22 resolved findings. Gap Closure (2026-03-25) then resolved SF-028 and
 marked SF-026 and SF-027 as Won't Do with documented rationale:
+
 - **SF-026** (Low, risk 5): Undo buffer bypasses display sanitization -- **Won't Do**. Confirmed theoretical only; no real exploit path. Undo buffer is populated from already-sanitized edit buffer; render pipeline provides independent output sanitization.
 - **SF-027** (Low, risk 8): `saved_termios` not async-signal-safe -- **Won't Do**. Cosmetic-only impact confirmed. Mitigated by SA_RESETHAND one-shot handler. Documented as accepted risk.
 - **SF-028** (Low, risk 5): Direct ArrayList length mutation -- **Resolved**. Replaced `state.buffer.items.len = state.cursor` with `state.buffer.shrinkRetainingCapacity(state.cursor)` in core.zig delete_to_eol handler.
@@ -31,21 +75,25 @@ marked SF-026 and SF-027 as Won't Do with documented rationale:
 Phase 9 audit (2026-03-24) performed a Phase 3 deep review. NC-001 and NC-002 (existing
 Low findings from Phase 2) were re-confirmed at Low severity with no changes. Two new
 Low findings were identified:
+
 - **SF-021**: Static mutable `home_dir_buf` without thread safety (`src/completion.zig:188`) -- **RESOLVED** (threadlocal added)
 - **SF-022**: History file TOCTOU on permissions (`src/history.zig:178-188`) -- **RESOLVED** (chmod added after file open)
 
 Phase 10 validation audit (2026-03-24) confirmed all prior findings remain accurately tracked.
 
 Phase 11 gap closure (2026-03-24) resolved SF-021 and SF-022:
+
 - SF-021: `home_dir_buf` changed to `threadlocal var home_dir_buf` in `src/completion.zig:188`.
 - SF-022: `file.chmod(0o600)` call added after file open in `src/history.zig` to enforce permissions regardless of pre-existing mode.
 
 Phase 12 gap closure (2026-03-24) resolved SF-023:
+
 - SF-023: `file.chmod(0o600)` call added after file open in `src/config.zig:162` to enforce permissions on pre-existing config files (same class as SF-022).
 All trust boundaries (paste, key parsing, signals, history, config, search, env vars) reviewed
 and confirmed secure.
 
 Phase 13 new findings (2026-03-24) identified 5 new validated findings (SF-024 through SF-028):
+
 - **SF-024**: History `clear()` missing chmod on pre-existing file (`src/history.zig:214`) -- **Open** (Low, risk 8)
 - **SF-025**: Signal handler uses `std.os.linux.*` on all POSIX platforms (`src/platform.zig:40,45,55`) -- **Open** (Medium, risk 35). Blocks macOS/FreeBSD support. GitLab issue created.
 - **SF-026**: Undo buffer `appendSlice` bypasses display sanitization (`src/core.zig:741`) -- **Won't Do** (Low/Info, risk 5). Theoretical only; no action required.
@@ -53,6 +101,7 @@ Phase 13 new findings (2026-03-24) identified 5 new validated findings (SF-024 t
 - **SF-028**: `delete_to_eol` directly mutates ArrayList length field (`src/core.zig:654`) -- **Resolved**. Replaced `items.len = cursor` with `shrinkRetainingCapacity(cursor)`.
 
 Phase 14 new findings (2026-03-25) identified 2 new validated findings (SF-029 and SF-030):
+
 - **SF-029**: Search display writes buffer content without CRLF conversion or control-char replacement (`src/search.zig:67-71`) -- **Resolved**. Added `replaceNewlinesForDisplay()` helper to replace `\n` with space in display buffer.
 - **SF-030**: `keywordProvider` stores pointer to stack-local parameter via `@ptrCast(@constCast(&keywords))` (`src/completion.zig:168`) -- **Resolved** (Phase 15). Parameter changed from by-value slice to pointer type, eliminating dangling pointer.
 
@@ -60,6 +109,7 @@ See "Phase 5 Manual Review Findings" section below for details on MF-001 through
 findings from Phase 5.
 
 **Key strengths:**
+
 - Memory-safe implementation with compile-time safety checks
 - No external C dependencies (stdlib only)
 - Bracketed paste mode enabled by default with sanitization (SF-005 resolved)
@@ -72,6 +122,7 @@ findings from Phase 5.
 - Structured error handling throughout
 
 **Remaining areas:**
+
 - Signal handler async-signal-safety of `saved_termios` (SF-027 -- Won't Do, mitigated by SA_RESETHAND)
 - Undo buffer sanitization theoretical gap (SF-026 -- Won't Do, no real exploit path)
 - Supply chain pinning for CI/CD dependencies (SF-012 -- Won't Do, external tooling)
@@ -79,6 +130,10 @@ findings from Phase 5.
 ---
 
 ## Audit Progression
+
+<!-- markdownlint-disable MD056 -->
+<!-- Historical wide progression table carried from prior cycles; column
+     count is known-irregular and preserved verbatim for audit continuity. -->
 
 | Metric | Initial (2026-03-23) | Re-audit (2026-03-24) | Post-closure (2026-03-24) | Phase 3 (2026-03-24) | Phase 4 (2026-03-24) | Phase 5 (2026-03-24) | Phase 9 (2026-03-24) | Phase 10 (2026-03-24) | Phase 11 (2026-03-24) | Phase 12 (2026-03-24) | Phase 13 (2026-03-24) | Phase 14 (2026-03-25) | Phase 15 (2026-03-25) | AC2-P4 (2026-03-25) | Delta (Phase 15 to AC2-P4) |
 |--------|----------------------|-----------------------|---------------------------|----------------------|----------------------|----------------------|----------------------|-----------------------|-----------------------|----------------------|----------------------|----------------------|----------------------|---------------------|----------------------------|
@@ -92,23 +147,322 @@ findings from Phase 5.
 | Low severity (open) | 8 | 3 | 0 | 2 | 0 | 0 | 2 | 2 | 0 | 0 | 4 | 4 | 3 | 3 | 0 | -3 |
 | Info severity (open) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 |
 | Manual findings reviewed | -- | -- | -- | -- | -- | 5 (MF-001..005) | 5 + NC-001, NC-002 re-confirmed | All prior findings re-verified | SF-021, SF-022 resolved | SF-023 resolved | 5 new findings (SF-024..028) | 2 new findings (SF-029, SF-030) | SF-029, SF-030 resolved | All 3 open + 22 resolved re-verified; no new findings | SF-028 resolved; SF-026, SF-027 won't-do | -3 open |
+<!-- markdownlint-enable MD056 -->
 
 ---
 
 ## Summary
 
+Counts below include the 7 Audit Cycle 3 findings (NEW-001..NEW-006, ADV-001) added in Revision 15.
+
 | Severity | Total | Open | Resolved | Won't Do | No Action | SLA |
 |----------|-------|------|----------|----------|-----------|-----|
 | Critical | 0 | 0 | 0 | 0 | 0 | 7 days |
-| High | 0 | 0 | 0 | 0 | 0 | 30 days |
-| Medium | 7 | 0 | 7 | 0 | 0 | 90 days |
-| Low | 22 | 0 | 16 | 5 | 1 | 180 days |
-| Info | 1 | 0 | 1 | 0 | 0 | Backlog |
-| **Total** | **30** | **0** | **24** | **5** | **1** | |
+| High | 1 | 0 | 1 | 0 | 0 | 30 days |
+| Medium | 10 | 0 | 10 | 0 | 0 | 90 days |
+| Low | 24 | 0 | 17 | 6 | 1 | 180 days |
+| Info | 2 | 0 | 2 | 0 | 0 | Backlog |
+| **Total** | **37** | **0** | **30** | **6** | **1** | |
 
-Note: SF-002 was reclassified as SF-014 with updated analysis. It is counted once (as SF-014, resolved). SF-023 is tracked in the resolved table (Phase 12). SF-025 resolved in Phase 13 (Medium resolved count updated from 6 to 7). SF-028 resolved (Gap Closure -- replaced items.len mutation with shrinkRetainingCapacity). SF-026 and SF-027 marked Won't Do (Gap Closure -- theoretical only / mitigated by SA_RESETHAND). SF-029 resolved (Info-severity, cosmetic display fix). SF-030 resolved (Phase 15 -- parameter changed to pointer type).
+Note: SF-002 was reclassified as SF-014 (counted once, resolved). Revision 15 (Audit Cycle 3,
+2026-06-12) added 7 findings: NEW-001 (High) resolved in `ec9a1dc`; NEW-002 (Medium) resolved in
+`ec9a1dc`; NEW-003 (Medium) resolved in `5eae04d`; NEW-004 (Low) **refuted / Won't Do** (no
+integrity drift); NEW-005 (Low) resolved in `ec9a1dc`; NEW-006 (Info) resolved in `cf50500`;
+ADV-001 (Medium) resolved in `d039c05`. Severity rollup delta vs Rev 14: High +1 (NEW-001),
+Medium +3 (NEW-002, NEW-003, ADV-001), Low +2 (NEW-004, NEW-005), Info +1 (NEW-006). Resolved
++6, Won't Do +1.
 
-### 0 open findings. No Critical, High, Medium, Low, or Info findings remain open.
+### 0 open findings. No Critical, High, Medium, Low, or Info findings remain open
+
+---
+
+## Revision 15 — Audit Cycle 3 (2026-06-12)
+
+Audit Cycle 3 combined a defensive, evidence-first AppSec code review
+(`docs/APPSEC_REVIEW_2026-06-12.md`, OWASP Top 10:2025 + CIS Controls v8.1.2) against the
+*current* source tree (commit `577adef`) with a follow-on adversarial review. Because all 18
+source files changed since the Rev 14 baseline (`f8eab0c`, ~4.2k lines net added during the Zig
+0.16.0 migration), resolved controls were re-verified against current source rather than stale
+line citations -- which is how the permission regressions below surfaced.
+
+Seven findings were identified. All are now resolved or dispositioned on branch
+`audit-cycle-3-gap-closure`. The dominant theme is a permission-hardening regression introduced
+by the Zig 0.16 compatibility migration (NEW-001/002/005, all rooted in a no-op `compat.chmod`),
+plus a high-blast-radius maintainer supply-chain tool (NEW-003) and an adversarial paste-state
+defect (ADV-001).
+
+### Audit Cycle 3 Findings Table
+
+| Rank | ID | Severity | Risk Score | Finding | Component | CWE / OWASP 2025 | Evidence (file:line) | Confidence | Issue | Disposition |
+|------|----|----------|------------|---------|-----------|------------------|----------------------|------------|-------|-------------|
+| 1 | NEW-001 | High | 45 | Config files written world-readable (no-op chmod + missing `.permissions`) | compat, config | CWE-732 / A04:2025 | `src/compat.zig:66-72`, `src/config.zig:163-169` | confirmed | [#122](https://gitlab.com/devnw/zig/repl/-/issues/122) | **Resolved** (`ec9a1dc`) |
+| 2 | NEW-002 | Medium | 35 | History permission enforcement on pre-existing files removed (SF-022/SF-024 regression) | history | CWE-732 / CWE-367 / A01:2025 | `src/history.zig:193-201,241-245` | confirmed | [#123](https://gitlab.com/devnw/zig/repl/-/issues/123) | **Resolved** (`ec9a1dc`) |
+| 3 | NEW-003 | Medium | 35 | `sync_diamond_deps.py --cascade --apply` high-blast-radius multi-repo push + `rm -rf`, no integrity check/confirmation | scripts (supply chain) | CWE-829 / CWE-494 / A03:2025 / A08 | `scripts/sync_diamond_deps.py:360-521,265-271` | suspected | [#124](https://gitlab.com/devnw/zig/repl/-/issues/124) | **Resolved** (`5eae04d`) |
+| 4 | NEW-005 | Low | 15 | `compat.chmod` silent no-op -- latent control failure (root cause of NEW-001/002) | compat | CWE-684 / CWE-392 / A09:2025 | `src/compat.zig:66-72` | confirmed | [#126](https://gitlab.com/devnw/zig/repl/-/issues/126) | **Resolved** (`ec9a1dc`) |
+| 5 | NEW-004 | Low | 8 | `build.zig.zon` otel pin label/version drift (`ref=v0.1.8` vs hash label `otel-0.1.7`) | build | CWE-1104 / A08:2025 | `build.zig.zon:21-22` | confirmed | [#125](https://gitlab.com/devnw/zig/repl/-/issues/125) | **Refuted / Won't Do** |
+| 6 | NEW-006 | Info | 3 | Observability seam hardcoded `enabled=false`; `-Dwith_otel` inert | observability | N/A (correctness) | `src/observability.zig:43` | confirmed | [#127](https://gitlab.com/devnw/zig/repl/-/issues/127), [#140](https://gitlab.com/devnw/zig/repl/-/issues/140) | **Resolved** (`cf50500`) |
+| 7 | ADV-001 | Medium | 35 | Bracketed-paste state reset per `read()` -> multi-read paste data loss + torn-marker REPL wedge | core, input | CWE-130 / CWE-241 / A03:2025 | `src/core.zig` paste loop | confirmed | [#142](https://gitlab.com/devnw/zig/repl/-/issues/142) | **Resolved** (`d039c05`) |
+
+### NEW-001: Config files written world-readable [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | High |
+| **Risk Score** | 45 (Impact: 3 x Likelihood: 3 x 4 + elevated: silently-broken certified control, untested) |
+| **CWE** | CWE-732: Incorrect Permission Assignment for Critical Resource |
+| **OWASP 2025** | A04:2025 Cryptographic/Sensitive-data-at-rest Failure (Broken-Access-Control flavor) |
+| **CIS** | 3.3 Data Access Control |
+| **Confidence** | confirmed (reproduced live, umask 022) |
+| **Exploit Surface** | Multi-user host -- other local UIDs reading `$XDG_CONFIG_HOME`/`$APP_CONFIG` |
+| **Status** | **Resolved** |
+| **Issue** | [#122](https://gitlab.com/devnw/zig/repl/-/issues/122) (closed) |
+| **Resolution commit** | `ec9a1dc` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** The Zig 0.16 migration turned `compat.chmod` into a silent no-op (`_ = file; _ = mode;`)
+and rewrote `Config.saveToFile` to call `createFile(path, .{ .truncate = true })` with **no
+`.permissions`** argument. The only "enforcement" was the no-op `compat.chmod(file, 0o600) catch {}`.
+Net effect, reproduced live: config files are created **world-readable (0o644)** and never
+tightened, while the history path (`createFile(.permissions=0o600)`) correctly yielded 0o600. This
+directly regressed the SF-001 / SF-023 controls previously certified Resolved, and there was no
+permission test in `config.zig` to catch it.
+
+**Evidence:**
+
+```text
+// src/compat.zig:66-72 -- no-op shim
+pub fn chmod(file: File, mode: std.posix.mode_t) !void { _ = file; _ = mode; }
+// src/config.zig:163 -- no .permissions
+var file = try std.Io.Dir.cwd().createFile(cio, path, .{ .truncate = true });
+// src/config.zig:166-169 -- only "enforcement" is the no-op
+compat.chmod(file, 0o600) catch {};
+```
+
+Live repro (umask 022): `config saveToFile perms = 0o644`, `history createFile(.permissions=0o600) perms = 0o600`.
+
+**Resolution:** `ec9a1dc` -- `saveToFile` now writes via a temp file created with
+`.permissions=0o600` and atomically renames into place (eliminating both the world-readable
+window and the pre-existing-file path); a working `compat.chmod` backs any remaining call sites
+(see NEW-005); a `saveToFile` permission regression test was added asserting mode `& 0o777 == 0o600`
+under umask 022/077 and against a pre-existing 0o644 file. Re-closes the regressed SF-001/SF-023
+controls with test coverage.
+
+**Affected paths:** `src/compat.zig`, `src/config.zig`
+
+---
+
+### NEW-002: History permission enforcement on pre-existing files removed [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium |
+| **Risk Score** | 35 (Impact: 3 x Likelihood: 3 x 4) |
+| **CWE** | CWE-732 / CWE-367 (TOCTOU) |
+| **OWASP 2025** | A01:2025 Broken Access Control |
+| **CIS** | 3.3 |
+| **Confidence** | confirmed |
+| **Exploit Surface** | Multi-user system; attacker pre-creates `~/.<app>_history` at 0o644 |
+| **Status** | **Resolved** |
+| **Issue** | [#123](https://gitlab.com/devnw/zig/repl/-/issues/123) (closed) |
+| **Resolution commit** | `ec9a1dc` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** New history files were correctly 0o600 via `createFile(.permissions=…)`, but an
+**already-existing** history file was opened with `.truncate=false, .permissions=0o600` and
+appended to **without** re-applying 0o600. POSIX `open` does not apply create-mode to an existing
+file, so a pre-created 0o644 file stayed world-readable while sensitive typed commands were
+appended. The SF-022 (`appendLine`) and SF-024 (`clear`) resolutions -- which added a post-open
+`chmod(0o600)` -- were replaced by the migration with a comment documenting the weaker behavior,
+regressing both certified-Resolved controls.
+
+**Evidence:**
+
+```text
+// src/history.zig:193-201
+const file = std.Io.Dir.cwd().createFile(compat.defaultIo(), path,
+    .{ .truncate = false, .permissions = @enumFromInt(0o600) }) catch |err| { ... };
+// "For pre-existing files, the OS-level permissions remain as-is."
+```
+
+The `clear()` path (`src/history.zig:241-245`) had the same gap.
+
+**Resolution:** `ec9a1dc` -- `append` and `clear` now call the (now-working) `compat.chmod(file, 0o600)`
+after open to re-tighten pre-existing files. Tests added that pre-create the history file at 0o644
+and assert 0o600 after the first append and after `clear()`. Restores the SF-022/SF-024 intent.
+
+**Affected paths:** `src/history.zig`
+
+---
+
+### NEW-003: `sync_diamond_deps.py --cascade --apply` high-blast-radius multi-repo mutator [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium |
+| **Risk Score** | 35 (Impact: 5 x Likelihood: ~2 x 4; severity environment-dependent -- maintainer tooling, not a runtime path) |
+| **CWE** | CWE-829 Inclusion from Untrusted Control Sphere / CWE-494 Download Without Integrity Check |
+| **OWASP 2025** | A03:2025 Software Supply Chain Failures / A08 Software & Data Integrity |
+| **CIS** | 16.4, 2.4 |
+| **Confidence** | suspected (severity depends on maintainer runtime environment) |
+| **Exploit Surface** | Maintainer running `--cascade --apply`; auto-discovered sibling repos on disk |
+| **Status** | **Resolved** |
+| **Issue** | [#124](https://gitlab.com/devnw/zig/repl/-/issues/124) (closed) |
+| **Resolution commit** | `5eae04d` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** `sync_diamond_deps.py --cascade --apply` rewrote `build.zig.zon` pins then
+`git commit`/`tag`/`push`ed to the `origin` of **every** auto-discovered sibling repo (from
+`$DEVNW_SIBLING_BASES` plus the parent of the current repo) and `rm -rf`'d cache directories --
+driven by an attacker-influenceable `--target pkg=ref#commit` string and by URLs derived from
+`git remote` output, with **no signature/provenance verification** and **no confirmation prompt**.
+A single command therefore had a blast radius of N remote repositories. To the script's credit, all
+subprocess calls used list-arg form (no `shell=True`), so there was no classic shell injection --
+the issue was over-broad, unverified, irreversible privileged operations.
+
+**Evidence:** `discover_repos()` (130-158) directory-globs siblings; `cascade(apply=True)` (360-521)
+commits/tags/`git push origin <branch>`/`git push origin <tag>` per consumer; `parse_target` (353-357)
+takes the target straight from the CLI; `zig_pkg_hash` (220-228) trusts whatever `zig fetch` returns;
+`refresh_cache` (265-271) `rm -rf`'s cache paths.
+
+**Resolution:** `5eae04d` -- added a typed-token confirmation gate (`--yes`/env bypass, non-TTY
+fail-safe), an explicit `--allow-repo` allowlist (refuses a broad set without `--all-discovered`),
+target integrity verification (`git tag -v` + tag->commit binding before adoption), a guarded
+`shutil.rmtree` (asserts in-repo path + known cache basename + not-a-symlink), and opt-in
+parent-dir discovery with blast-radius logging that prints the full target repo list.
+
+**Affected paths:** `scripts/sync_diamond_deps.py`
+
+---
+
+### NEW-004: otel dependency pin label/version drift [REFUTED / WON'T DO]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 8 (Impact: 2 x Likelihood: 1 x 4) |
+| **CWE** | CWE-1104: Use of Unmaintained/Ambiguous Third-Party Component Pin |
+| **OWASP 2025** | A08:2025 Software & Data Integrity |
+| **CIS** | 2.1 |
+| **Confidence** | confirmed (manifest) -- but **no integrity issue** |
+| **Exploit Surface** | None -- Zig pins integrity to `.hash`; `lazy=true`, only under (inert) `-Dwith_otel` |
+| **Status** | **Refuted / Won't Do** |
+| **Issue** | [#125](https://gitlab.com/devnw/zig/repl/-/issues/125) (closed, refuted) |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** `build.zig.zon:21-22` shows `ref=v0.1.8` in the URL while the Zig package hash label
+reads `otel-0.1.7-…`. This was reported as a pin/version drift, but verification refuted it as a
+security finding.
+
+**Refutation (verified):** `zig fetch 'git+https://gitlab.com/devnw/zig/otel.git?ref=v0.1.8#a43c52592c3c131019fed264da8d8c532c23a531'`
+returns hash `otel-0.1.7-B0v3lvwMNADEHMtQzsmbCvC6qxWxlBtVcpdTX-Wb5BnV` -- an **exact match** to the
+committed `.hash`. The `otel-0.1.7` prefix is the dependency's internal `.version` string (Zig's
+content-hash labelling convention), not the git ref; `ref=v0.1.8` is the git tag; `#<commit>` and
+`.hash` are authoritative and content-fixed. There is no substitution path and no integrity drift.
+Marked **Won't Do** with this rationale (cosmetic SBOM-label readability only). Issue #125 closed
+with the verification comment.
+
+**Affected paths:** `build.zig.zon` (no change required)
+
+---
+
+### NEW-005: `compat.chmod` silent no-op is a latent control failure [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Low |
+| **Risk Score** | 15 (Impact: 3 x Likelihood: ~1.25 x 4; root cause of NEW-001 High & NEW-002 Medium) |
+| **CWE** | CWE-684 Incorrect Provision of Specified Functionality / CWE-392 Missing Report of Error Condition |
+| **OWASP 2025** | A09:2025 (security-relevant operation fails silently) |
+| **CIS** | 16 |
+| **Confidence** | confirmed |
+| **Exploit Surface** | Any current/future caller relying on `compat.chmod` to harden permissions |
+| **Status** | **Resolved** |
+| **Issue** | [#126](https://gitlab.com/devnw/zig/repl/-/issues/126) (closed) |
+| **Resolution commit** | `ec9a1dc` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** `src/compat.zig:66-72` -- a `pub` function documented as "Set file permissions
+(replacement for old file.chmod)," returning `!void`, whose entire body was `_ = file; _ = mode;`.
+Any caller writing `compat.chmod(f, 0o600) catch {}` believing it hardened permissions was silently
+wrong -- this was the proximate cause of NEW-001 and the un-fixable state behind NEW-002. A security
+primitive that lies about what it does is worse than an absent one.
+
+**Resolution:** `ec9a1dc` -- `compat.chmod` is now implemented against the Zig 0.16
+`std.Io.File.setPermissions` (POSIX) API and provably changes file mode; it is documented as a
+genuine no-op **only on Windows** (which lacks POSIX permission bits). A unit test asserts the mode
+change. With the root cause eliminated, NEW-001 and NEW-002 are fully closed.
+
+**Affected paths:** `src/compat.zig`
+
+---
+
+### NEW-006: Observability seam hardcoded `enabled=false` [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Info |
+| **Risk Score** | 3 (correctness/feature-integrity gap; security-neutral-to-positive) |
+| **CWE** | N/A (correctness) |
+| **OWASP 2025** | N/A |
+| **Confidence** | confirmed |
+| **Exploit Surface** | N/A -- the hardcode shrank attack surface (otel/network code never ran) |
+| **Status** | **Resolved** |
+| **Issue** | [#127](https://gitlab.com/devnw/zig/repl/-/issues/127) (closed); companion build-wiring [#140](https://gitlab.com/devnw/zig/repl/-/issues/140) (closed) |
+| **Resolution commit** | `cf50500` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** `src/observability.zig:43` -- `pub const enabled: bool = false;` was hardcoded
+(commit `0137a67`) to dodge a Zig-0.16 `build_options` module-dedup error, decoupling the seam from
+`build_options.with_otel`. Every seam helper short-circuited to a no-op even under `-Dwith_otel=true`,
+making the documented otel capability inert and `observability_init.zig` effectively dead. This was
+security-neutral-to-mildly-positive (the otel/network dependency never executed), but a correctness
+gap worth tracking.
+
+**Resolution:** `cf50500` -- restored `pub const enabled = build_options.with_otel`; the module-dedup
+issue was resolved so `-Dwith_otel=true` now compiles and emits spans (the enabled-mode test now runs
+and records 1 span). A CI `test-with-otel` job was added to exercise the path. Companion build-wiring
+issue #140 (build.zig wiring `observability_init` under `-Dwith_otel=true` against the dead path) is
+also resolved.
+
+**Affected paths:** `src/observability.zig`, build wiring, `.gitlab-ci.yml`
+
+---
+
+### ADV-001: Bracketed-paste state reset per `read()` -- multi-read paste data loss + torn-marker REPL wedge [RESOLVED]
+
+| Field | Value |
+|-------|-------|
+| **Severity** | Medium |
+| **Risk Score** | 35 (Impact: 3 x Likelihood: 3 x 4) |
+| **CWE** | CWE-130 Improper Handling of Length Parameter Inconsistency / CWE-241 Improper Handling of Unexpected Data Type |
+| **OWASP 2025** | A03:2025 (input-handling integrity) |
+| **Confidence** | confirmed (adversarial review; 6 repro tests) |
+| **Exploit Surface** | Terminal byte stream -- pastes larger than one `read()` buffer, or markers split across reads |
+| **Status** | **Resolved** |
+| **Issue** | [#142](https://gitlab.com/devnw/zig/repl/-/issues/142) (closed) |
+| **Resolution commit** | `d039c05` |
+| **Resolved date** | 2026-06-12 |
+
+**Summary:** Bracketed-paste mode state was reset on each `read()` call. A paste larger than the
+read buffer, or one whose `ESC[200~` / `ESC[201~` marker was split across two reads ("torn marker"),
+caused **paste data loss** across reads and, in the torn-end-marker case, left the REPL stuck in
+paste mode -- a **wedge** in which subsequent input was silently swallowed. This adversarial finding
+breaks-then-restores the SF-005 / SF-015 / SF-016 certifications: notably **SF-015's prior Won't-Do
+rationale -- "terminal emulators deliver paste markers atomically; the 256-byte read buffer is much
+larger than the 6-byte marker; no real-world exploitation path exists" -- is now SUPERSEDED as
+incorrect**, since multi-read fragmentation was demonstrated.
+
+**Resolution:** `d039c05` -- paste state was hoisted to persist across `read()` calls; torn start/end
+markers now carry over between reads; a paste-mode safety bound force-exits paste mode if it exceeds a
+bound, preventing the wedge. Six paste tests were added: zero data loss for pastes >256B and >4096B
+spanning multiple reads, torn start-marker recovery, torn end-marker recovery, and force-exit on an
+unterminated paste. The SF-005/SF-015/SF-016 controls are re-certified under the corrected
+multi-read model.
+
+**Note on SF-015:** SF-015 remains in the Won't Do table for historical continuity, but its rationale
+is **explicitly superseded** by ADV-001 -- the fragmentation gap it dismissed was real and is now
+handled by the ADV-001 fix. No separate SF-015 re-open is tracked; the protection is delivered via
+ADV-001/`d039c05`.
 
 ---
 
@@ -274,7 +628,8 @@ support. The remaining 4 Low findings are tracked in this gap analysis only per 
 **Likelihood:** Extremely low. Same preconditions as SF-022: attacker must have write access to the user's home directory and pre-create the history file. The `appendLine()` path already has the chmod fix, narrowing the race window.
 
 **Evidence:**
-```
+
+```text
 // src/history.zig:214 -- clear() path (no chmod after createFile)
 const file = std.fs.cwd().createFile(path, .{ .truncate = true, .mode = 0o600 }) catch {
     return;
@@ -291,6 +646,7 @@ Compare with `appendLine()` at line 186-188 which correctly calls `file.chmod(0o
 **Fix guidance:** Add `file.chmod(0o600) catch {};` after the `createFile` call in `clear()`, matching the pattern already used in `appendLine()` at line 187.
 
 **Acceptance criteria:**
+
 - `clear()` enforces 0o600 permissions on the history file after truncation, regardless of pre-existing mode
 - Same `chmod` pattern as `appendLine()` at `src/history.zig:186-188`
 
@@ -321,7 +677,8 @@ Compare with `appendLine()` at line 186-188 which correctly calls `file.chmod(0o
 **Likelihood:** Certain on macOS/FreeBSD. Any attempt to `zig build` on these platforms will produce a compile error referencing missing `std.os.linux` symbols.
 
 **Evidence:**
-```
+
+```text
 // src/platform.zig:40 -- Linux-specific tcsetattr
 _ = std.os.linux.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
 
@@ -339,6 +696,7 @@ All three should use `std.posix.system.*` (the OS-generic POSIX layer) or be wra
 **How to verify:** Run `zig build` on macOS or FreeBSD and observe compile errors referencing `std.os.linux.tcsetattr`, `std.os.linux.write`, `std.os.linux.kill`.
 
 **Fix guidance:** Replace Linux-specific calls with portable alternatives:
+
 - `std.os.linux.tcsetattr` -> `std.posix.system.tcsetattr` (or add comptime `os.tag` switch)
 - `std.os.linux.write` -> `std.posix.system.write`
 - `std.os.linux.kill` -> `std.posix.system.kill`
@@ -347,6 +705,7 @@ All three should use `std.posix.system.*` (the OS-generic POSIX layer) or be wra
 These `std.posix.system.*` functions dispatch to the correct platform backend at comptime while maintaining async-signal-safety.
 
 **Acceptance criteria:**
+
 - `handleTerminalSignal()` compiles and functions correctly on Linux, macOS, and FreeBSD
 - Terminal is restored to original state when SIGTERM/SIGHUP is received on all POSIX platforms
 - No `std.os.linux.*` references remain in signal handler code path
@@ -376,7 +735,8 @@ These `std.posix.system.*` functions dispatch to the correct platform backend at
 **Likelihood:** Theoretical only. Would require a future code change to introduce a path that writes unsanitized content into the edit buffer, which then gets captured in an undo snapshot, and the render sanitization would also need to be bypassed.
 
 **Evidence:**
-```
+
+```text
 // src/core.zig:741
 state.buffer.appendSlice(state.allocator, entry.buffer) catch {
 ```
@@ -412,7 +772,8 @@ state.buffer.appendSlice(state.allocator, entry.buffer) catch {
 **Likelihood:** Extremely low. The race window is the duration of a struct copy (~48 bytes on Linux). SA_RESETHAND ensures the handler fires at most once. The signal would need to arrive during the exact instruction sequence that copies the termios struct.
 
 **Evidence:**
-```
+
+```text
 // src/platform.zig:25 -- non-atomic global
 var saved_termios: if (builtin.os.tag == .windows) void else ?std.posix.termios = ...
 
@@ -459,7 +820,8 @@ saved_termios = null;
 **Likelihood:** Theoretical. The direct mutation is a common Zig pattern for truncation and is equivalent to `shrinkRetainingCapacity`. No existing code path reads beyond `items.len`.
 
 **Evidence:**
-```
+
+```text
 // src/core.zig:654
 state.buffer.items.len = state.cursor;
 ```
@@ -504,7 +866,8 @@ tracked in this gap analysis only.
 **Likelihood:** Low practical impact. Multi-line history entries are uncommon in typical REPL usage. The garbled display is immediately visible and self-correcting on search exit.
 
 **Evidence:**
-```
+
+```text
 // src/search.zig:67-71
 const search_line = std.fmt.bufPrint(&line_buf, "\r(reverse-i-search)`{s}': {s}", .{
     state.search_buffer.items,
@@ -549,7 +912,8 @@ The `state.buffer.items` slice is written verbatim. If the matched history entry
 **Likelihood:** Low overall, but certain for any consumer who uses the API as designed. The function signature and documentation suggest it should work (accepting a keyword list and returning a provider), but the returned provider is immediately invalid. The saving grace is that no internal code path calls this function, so the bug is dormant unless a consumer discovers and uses the API.
 
 **Evidence:**
-```
+
+```text
 // src/completion.zig:133 -- function signature (keywords is a stack-local parameter)
 pub fn keywordProvider(keywords: []const []const u8) CompletionProvider {
 
@@ -569,6 +933,7 @@ const kw_list: []const []const u8 = @ptrCast(@alignCast(provider.context.?));
 **How to verify:** Write a test that calls `keywordProvider`, then calls `provider.generateFn` on the returned provider. In `Debug` mode, Zig's safety checks should detect the use-after-free. In `ReleaseFast`, the behavior is undefined.
 
 **Fix guidance:** Change the function to accept a pointer to the slice rather than a by-value slice, ensuring the caller is responsible for the lifetime:
+
 ```zig
 pub fn keywordProvider(keywords: *const []const []const u8) CompletionProvider {
     return CompletionProvider{
@@ -577,9 +942,11 @@ pub fn keywordProvider(keywords: *const []const []const u8) CompletionProvider {
     };
 }
 ```
+
 Alternatively, store the slice value directly (Zig slices are pointer+length, 16 bytes) in the context field if the `?*anyopaque` field can be repurposed, or add a dedicated `slice_context` field to `CompletionProvider`.
 
 **Acceptance criteria:**
+
 - `keywordProvider` returns a `CompletionProvider` that remains valid after the function returns
 - Calling `provider.generate()` correctly iterates the keyword list without undefined behavior
 - A test demonstrates that the returned provider works correctly when `generate` is called after `keywordProvider` returns
@@ -736,7 +1103,8 @@ are created for Low/suspected findings -- they are tracked here in the gap analy
 **Likelihood:** Extremely low. The library is designed for single-threaded use. The affected code path is Windows-only (`builtin.os.tag == .windows`). On POSIX systems, `getHomeDir()` returns `std.posix.getenv("HOME")` which does not use the static buffer.
 
 **Evidence:**
-```
+
+```text
 // src/completion.zig:187-188
 /// Static buffer for the Windows home directory path (UTF-8 decoded).
 var home_dir_buf: [512]u8 = undefined;
@@ -749,6 +1117,7 @@ var home_dir_buf: [512]u8 = undefined;
 **Fix guidance:** Change `var home_dir_buf` to `threadlocal var home_dir_buf` to give each thread its own copy. This is a one-line change with no performance impact.
 
 **Acceptance criteria:**
+
 - `home_dir_buf` is declared as `threadlocal var` or otherwise protected against concurrent access
 - No behavioral change for single-threaded callers
 
@@ -776,7 +1145,8 @@ var home_dir_buf: [512]u8 = undefined;
 **Likelihood:** Extremely low. Exploitation requires: (1) the attacker has write access to the user's home directory, (2) the history file does not yet exist, (3) the attacker creates it before the REPL does. Home directory permissions (typically 0o700 or 0o750) prevent other users from creating files there. The `isPathSafe()` validation and `makePath` for the directory further constrain the attack surface.
 
 **Evidence:**
-```
+
+```text
 // src/history.zig:178
 const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }) catch |err| {
     // If we can't save history, just continue without persisting
@@ -792,6 +1162,7 @@ const file = std.fs.cwd().createFile(path, .{ .truncate = false, .mode = 0o600 }
 **Fix guidance:** After opening an existing file, call `fchmod(fd, 0o600)` (or the Zig equivalent `file.chmod(0o600)`) to enforce the expected permissions regardless of the file's pre-existing mode. Alternatively, check permissions after open and refuse to write if they are too permissive.
 
 **Acceptance criteria:**
+
 - History file permissions are enforced to `0o600` after opening, regardless of pre-existing mode
 - Or: the library refuses to write to files with permissions more permissive than `0o600`
 
@@ -824,6 +1195,7 @@ No new action required.
 **Resolution:** When the paste buffer fills before the end marker is seen, the accumulated content is flushed into `state.buffer` via `sanitizePasteContent` + `insertSlice`, the paste length is reset to 0, and collection continues. This handles pastes of arbitrary size without dynamic allocation. The flush logic is extracted into a dedicated `flushPasteBuffer` helper used by both the buffer-full path and the paste-end-marker path.
 
 **Evidence of fix:**
+
 - `src/core.zig` -- `flushPasteBuffer()` helper function flushes and resets paste buffer
 - `src/core.zig` -- `consumeBracketedPaste()` calls `flushPasteBuffer` when `paste_len >= paste_buf.len`
 - 4 unit tests added: normal paste, paste exceeding buffer, exact boundary, multiple flush cycles
@@ -845,6 +1217,7 @@ No new action required.
 **Summary:** The reverse-i-search display at `src/core.zig:791` writes `state.search_buffer.items` directly into an ANSI-formatted `bufPrint` call without explicit sanitization. The search buffer content is rendered to the terminal as part of the `(reverse-i-search)` prompt line.
 
 **Evidence:**
+
 - `src/core.zig:791` -- `const search_line = std.fmt.bufPrint(&line_buf, "\r(reverse-i-search)\x60{s}': {s}", .{ state.search_buffer.items, ... })`
 
 **Current mitigation:** The input filter in the key processing path only accepts characters in the 0x20-0x7F range into the search buffer, which prevents control characters and escape sequences from entering. This mitigation makes the finding theoretical rather than actively exploitable.
@@ -854,6 +1227,7 @@ No new action required.
 **Fix guidance:** Add explicit sanitization of `search_buffer.items` before rendering, consistent with the `appendHistoryFiltered` pattern used elsewhere. This provides defense-in-depth even if the input filter is the primary guard.
 
 **Acceptance criteria:**
+
 - Search display output is explicitly sanitized before terminal write, or a code comment documents the input filter as the intentional sanitization point.
 
 **Affected paths:** `src/core.zig`
@@ -875,6 +1249,7 @@ No new action required.
 **Resolution:** Replaced all `catch {}` blocks with `catch { buffer_full = true; }` and added early-exit logic. When the buffer fills during the content-writing loop, the loop breaks immediately. Cursor positioning ANSI sequences are skipped entirely when overflow is detected, preventing partial escape sequences from corrupting the terminal. The valid partial content is still written to stdout.
 
 **Evidence of fix:**
+
 - `src/core.zig` -- `renderPrompt()` now tracks `buffer_full` flag
 - Each `catch` block sets `buffer_full = true` instead of silently continuing
 - Content loop uses `break` on overflow instead of continuing to attempt failed writes
@@ -898,6 +1273,7 @@ No new action required.
 **Summary:** The Vi-mode `de` (delete to end of word) command at `src/keymap_vi.zig:114` computes `state.buffer.items.len - 1`. This subtraction would underflow if `items.len` is 0. The code is currently safe because line 113 guards with `end < state.buffer.items.len`, which prevents entering the while loop when the buffer is empty. However, the safety depends on a single outer guard, and refactoring that guard could silently introduce an underflow.
 
 **Evidence:**
+
 - `src/keymap_vi.zig:113` -- `if (end < state.buffer.items.len and !std.ascii.isWhitespace(state.buffer.items[end])) {`
 - `src/keymap_vi.zig:114` -- `while (end < state.buffer.items.len - 1 and ...) : (end += 1) {}`
 
@@ -908,6 +1284,7 @@ No new action required.
 **Fix guidance:** Replace `state.buffer.items.len - 1` with a saturating subtraction (`@max(state.buffer.items.len, 1) - 1` or equivalent), or restructure the loop condition to avoid the subtraction entirely (e.g., `end + 1 < state.buffer.items.len`).
 
 **Acceptance criteria:**
+
 - The `de` command does not depend on an outer guard to prevent integer underflow.
 - The while-loop condition is self-contained safe regardless of buffer length.
 
@@ -930,6 +1307,7 @@ No new action required.
 **Resolution:** SHA-256 hashes for each supported architecture are now pinned directly in `.gitlab-ci.yml` as CI variables (`ZIG_SHA256_X86_64_LINUX`, `ZIG_SHA256_AARCH64_LINUX`). The `index.json` fetch has been removed entirely. The hash is now verified from the git repository (a separate trust root) rather than the download origin. The `python3` dependency was also removed from the install script as it is no longer needed.
 
 **Evidence (after fix):**
+
 - `.gitlab-ci.yml:24-28` -- `ZIG_SHA256_X86_64_LINUX` and `ZIG_SHA256_AARCH64_LINUX` pinned in variables section
 - `.gitlab-ci.yml:54-56` -- architecture case sets `EXPECTED_HASH` from pinned variable
 - `.gitlab-ci.yml:59-60` -- guard rejects missing hash with clear error message
@@ -1030,6 +1408,7 @@ No new action required.
 ### SF-001: History/config files world-readable -- RESOLVED
 
 **Resolution:** `.mode = 0o600` added to all `createFile` calls.
+
 - `src/history.zig:151` -- `createFile(path, .{ .truncate = false, .mode = 0o600 })`
 - `src/history.zig:182` -- `createFile(path, .{ .truncate = true, .mode = 0o600 })`
 - `src/config.zig:153` -- `createFile(path, .{ .mode = 0o600 })`
@@ -1066,7 +1445,7 @@ No new action required.
 
 ## Risk Distribution
 
-```
+```text
 OPEN (0 findings):
 (none)
 
@@ -1260,7 +1639,19 @@ All automated security scanners returned zero findings across all phases (initia
 
 **No immediate rotation or emergency remediation required.** No leaked secrets, no active RCE, no authentication bypass.
 
+**Audit Cycle 3 action summary (2026-06-12, Revision 15):**
+
+- **NEW-001 (High, #122):** Resolved (`ec9a1dc`) -- `saveToFile` writes via temp file at 0o600 + atomic rename; regression test added. Re-closes regressed SF-001/SF-023.
+- **NEW-002 (Medium, #123):** Resolved (`ec9a1dc`) -- `append`/`clear` re-apply `compat.chmod(0o600)` on pre-existing files; pre-create-0o644 tests added. Re-closes regressed SF-022/SF-024.
+- **NEW-003 (Medium, #124):** Resolved (`5eae04d`) -- confirmation gate + `--allow-repo` allowlist + `git tag -v` integrity + guarded `shutil.rmtree` + opt-in discovery.
+- **NEW-004 (Low, #125):** Refuted / Won't Do -- `zig fetch` hash matches `build.zig.zon` exactly; label is the dep's internal `.version`, not the git ref. No integrity drift.
+- **NEW-005 (Low, #126):** Resolved (`ec9a1dc`) -- `compat.chmod` implemented against Zig 0.16 `setPermissions`; no-op only on Windows; unit test asserts mode change. Root cause of NEW-001/002 eliminated.
+- **NEW-006 (Info, #127, #140):** Resolved (`cf50500`) -- restored `enabled = build_options.with_otel`; `-Dwith_otel` emits spans; CI `test-with-otel` job added.
+- **ADV-001 (Medium, #142):** Resolved (`d039c05`) -- paste state persists across reads; torn-marker carry-over; force-exit safety bound; 6 paste tests. Supersedes SF-015's incorrect Won't-Do rationale.
+- **0 open findings remain.** 6 resolved this cycle, 1 refuted.
+
 **Gap Closure action summary (2026-03-25):**
+
 - **SF-028 (Low, risk 5):** Resolved -- replaced `items.len = cursor` with `shrinkRetainingCapacity(cursor)` in core.zig delete_to_eol handler.
 - **SF-027 (Low, risk 8):** Won't Do -- documented SA_RESETHAND mitigation as accepted risk. Cosmetic-only impact confirmed.
 - **SF-026 (Low, risk 5):** Won't Do -- theoretical only, no exploit path. Undo buffer populated from sanitized edit buffer; render pipeline provides independent sanitization.
@@ -1271,4 +1662,4 @@ All automated security scanners returned zero findings across all phases (initia
 
 ---
 
-*Last updated: 2026-03-25 (Gap Closure -- SF-028 resolved, SF-026 and SF-027 won't-do; 0 open findings; 30 total SF-IDs; 24 resolved; 5 won't do; 1 no action; no GitLab issues changed)*
+*Last updated: 2026-06-12 (Revision 15, Audit Cycle 3 -- NEW-001 through NEW-006 + ADV-001; 6 resolved, NEW-004 refuted/Won't Do; 0 open findings; 37 total findings; 30 resolved; 6 won't do; 1 no action. Issues #122, #123, #124, #126, #127, #140, #142 closed this cycle; #125 closed (refuted). #31 (GAP-0052 release signing) remains open/blocked.)*

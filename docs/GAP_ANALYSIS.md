@@ -1,24 +1,25 @@
 # Gap Analysis Report
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Date:** 2026-03-25 (Phase 20 / Gap Closure -- 0 new gaps added, 0 resolved; test count updated to 315)
-**Previous audit:** 2026-03-25 (Phase 19, Audit Cycle 2, 1 open gap)
+**Date:** 2026-06-12 (Audit Cycle 3 / Gap Closure -- 8 new gaps assigned (GAP-0066..GAP-0073); 7 resolved this cycle; 2 issues closed as already-implemented (#13, #56))
+**Previous audit:** 2026-03-25 (Phase 20, Audit Cycle 2, 1 open gap)
 **Auditor:** Principal Engineer Audit (Claude Opus 4.6)
 **Zig Version Installed:** 0.15.2
-**Build Status:** Tests pass (`zig build test` exits 0, 315 tests)
+**Build Status:** Tests pass (`zig build test` exits 0)
 
 ---
 
 ## Summary
 
-- **Total gaps identified (all time):** 65
-- **Resolved (all time):** 64 (GAP-0001..GAP-0051, GAP-0053..GAP-0065)
-- **Total open gaps:** 1
+- **Total gaps identified (all time):** 73
+- **Resolved (all time):** 71 (GAP-0001..GAP-0051, GAP-0053..GAP-0072)
+- **Total open gaps:** 2 (GAP-0052, GAP-0073)
 - **Carried forward (still open):** 1 (GAP-0052 -- blocked on #31)
-- **New this phase:** 0
-- **Resolved this phase:** 0
-- **Previous resolved cycles:** 64 gaps resolved across Phases 1-16. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
-- **Audit cycle 2 notes:** Phases 17-19 (second full audit). No new gaps found. No regressions in resolved gaps. GAP-0052 remains blocked on GitLab issue #31. Next Gap-ID: GAP-0066.
+- **New this cycle:** 8 (GAP-0066..GAP-0073)
+- **Resolved this cycle:** 7 (GAP-0066, GAP-0067, GAP-0068, GAP-0069, GAP-0070, GAP-0071, GAP-0072)
+- **Deferred this cycle:** 1 (GAP-0073 -- API docs not generated/published; low priority, remains open)
+- **Previous resolved cycles:** 64 gaps resolved across Phases 1-20. All in [GAP_ANALYSIS_RESOLVED.md](GAP_ANALYSIS_RESOLVED.md)
+- **Audit cycle 3 notes:** Third full audit (branch `audit-cycle-3-gap-closure`). 8 new gaps assigned; 7 resolved in this cycle across commits ec9a1dc (config/history/compat permissions), 5eae04d (sync_diamond_deps blast radius), cf50500 (observability seam + Docker digest pin), and d039c05 (processInput testability). GAP-0052 remains blocked on GitLab issue #31. GAP-0073 deferred (no generated API docs yet). Stale-tracking issues #13 (terminal resize) and #56 (processInput refactor) closed as already-implemented. Next Gap-ID: GAP-0074.
 
 ---
 
@@ -26,7 +27,8 @@
 
 | Gap-ID | Title | Category | Severity | Issue | Status |
 |--------|-------|----------|----------|-------|--------|
-| GAP-0052 | SECURITY.md release signing partially verified -- docs and CI enforcement missing | Security | Medium | [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) | Open (partial) |
+| GAP-0052 | SECURITY.md release signing partially verified -- docs and CI enforcement missing | Security | Medium | [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) | Open (blocked) |
+| GAP-0073 | API documentation partial -- inline doc comments exist but no generated/published docs | Docs | Low | [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) | Open (deferred) |
 
 ---
 
@@ -37,13 +39,14 @@
 | Critical | 0 | -- |
 | High | 0 | -- |
 | Medium | 1 | GAP-0052 |
-| Low | 0 | -- |
+| Low | 1 | GAP-0073 |
 
 ---
 
 ## Detailed Gap Sections
 
 ### GAP-0048: ROADMAP.md issue #15 status stale [RESOLVED]
+
 - **Issue:** [#107](https://gitlab.com/devnw/zig/repl/-/issues/107) (closed)
 - **Category:** Docs
 - **Severity:** Low
@@ -53,6 +56,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0049: CONTRIBUTING.md docs/ tree incomplete [RESOLVED]
+
 - **Issue:** [#108](https://gitlab.com/devnw/zig/repl/-/issues/108) (closed)
 - **Category:** Docs
 - **Severity:** Low
@@ -62,6 +66,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0050: README "Current Priorities" lists closed issues #1 and #15 [RESOLVED]
+
 - **Issue:** [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed, combined with GAP-0051)
 - **Category:** Docs
 - **Severity:** Low
@@ -71,6 +76,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0051: README Contributing section lists closed issues #15 and #21 [RESOLVED]
+
 - **Issue:** [#109](https://gitlab.com/devnw/zig/repl/-/issues/109) (closed, combined with GAP-0050)
 - **Category:** Docs
 - **Severity:** Low
@@ -80,6 +86,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0052: SECURITY.md release signing partially verified -- docs and CI enforcement missing
+
 - **Issue:** [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (existing -- do NOT create duplicate)
 - **Category:** Security
 - **Severity:** Medium
@@ -101,7 +108,31 @@
   - CI pipeline rejects unsigned release tags
   - Key rotation policy is documented
 
+### GAP-0073: API documentation partial -- no generated/published docs
+
+- **Issue:** [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) (existing -- do NOT create duplicate)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** Open (deferred -- not addressed in Audit Cycle 3)
+- **Requirement source:** GitLab issue #20 ("Write API documentation")
+- **Current state (evidence):**
+  - Inline doc comments (`///`) exist across `src/*.zig` for public types and functions
+  - `README.md` API Reference section documents the public surface of `src/repl.zig`
+  - No `zig build docs` step or autodoc target exists in `build.zig`
+  - No generated/published HTML API documentation is produced or hosted
+- **Why this is a gap:** Issue #20 calls for API documentation. Inline comments and the README cover the surface, but there is no generated, browsable, published API reference (e.g., Zig autodoc output), so the requirement is only partially satisfied.
+- **Impact/Risk:** Consumers must read source or the README rather than a generated reference. Low impact -- the public API is small and documented inline -- but the requirement remains formally unmet.
+- **Recommended fix:**
+  1. Add a `zig build docs` target (autodoc) to `build.zig`
+  2. Publish generated docs (e.g., GitLab Pages) and link from README
+  3. Close issue #20 once generated docs are published
+- **Acceptance criteria:**
+  - `zig build docs` produces browsable API documentation
+  - Generated docs are published and linked from README
+  - Issue #20 closed with the published docs URL as evidence
+
 ### GAP-0053: GAP_ANALYSIS.md test count stale (257 -> 285) [RESOLVED]
+
 - **Issue:** -- (doc staleness)
 - **Category:** Docs
 - **Severity:** Low
@@ -111,6 +142,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0054: CONTRIBUTING.md project tree missing 10 root-level files [RESOLVED]
+
 - **Issue:** -- (doc gap)
 - **Category:** Docs
 - **Severity:** Low
@@ -120,6 +152,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0055: SECURITY.md CI scanning list missing Gitleaks [RESOLVED]
+
 - **Issue:** -- (doc gap)
 - **Category:** Security
 - **Severity:** Low
@@ -129,6 +162,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0056: SECURITY.md CI scanning list missing SBOM [RESOLVED]
+
 - **Issue:** -- (doc gap)
 - **Category:** Security
 - **Severity:** Low
@@ -138,6 +172,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0057: README API Reference missing SyntheticKey type [RESOLVED]
+
 - **Issue:** -- (doc gap)
 - **Category:** Docs
 - **Severity:** Low
@@ -147,6 +182,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0058: Minimum Zig version inconsistency (build.zig.zon says 0.15.0, docs say 0.14.0) [RESOLVED]
+
 - **Issue:** -- (doc/manifest discrepancy)
 - **Category:** Docs
 - **Severity:** Low
@@ -156,6 +192,7 @@
 - **Resolved date:** 2026-03-24
 
 ### GAP-0059: README API Reference missing 8 public items [RESOLVED]
+
 - **Issue:** [#113](https://gitlab.com/devnw/zig/repl/-/issues/113)
 - **Category:** Docs
 - **Severity:** Low
@@ -165,6 +202,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0060: CHANGELOG.md missing v0.1.1 entry and broken links [RESOLVED]
+
 - **Issue:** [#114](https://gitlab.com/devnw/zig/repl/-/issues/114)
 - **Category:** Docs
 - **Severity:** Medium
@@ -174,6 +212,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0061: Copyright year 2024-2025 stale in source files and LICENSE [RESOLVED]
+
 - **Issue:** [#115](https://gitlab.com/devnw/zig/repl/-/issues/115)
 - **Category:** Docs (Legal)
 - **Severity:** Low
@@ -183,6 +222,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0062: CONTRIBUTING.md:9 says "0.14.0" instead of "0.15.0" [RESOLVED]
+
 - **Issue:** [#112](https://gitlab.com/devnw/zig/repl/-/issues/112)
 - **Category:** Docs
 - **Severity:** Low
@@ -192,6 +232,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0063: Root CONTRIBUTING.md duplicates docs/CONTRIBUTING.md [RESOLVED]
+
 - **Issue:** [#116](https://gitlab.com/devnw/zig/repl/-/issues/116)
 - **Category:** Docs
 - **Severity:** Low
@@ -201,6 +242,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0064: .gitignore contains irrelevant Go/Python/Rust/Docker/Node rules [RESOLVED]
+
 - **Issue:** [#117](https://gitlab.com/devnw/zig/repl/-/issues/117)
 - **Category:** Code Quality
 - **Severity:** Low
@@ -210,6 +252,7 @@
 - **Resolved date:** 2026-03-25
 
 ### GAP-0065: README Building section incomplete format check command [RESOLVED]
+
 - **Issue:** [#118](https://gitlab.com/devnw/zig/repl/-/issues/118)
 - **Category:** Docs
 - **Severity:** Low
@@ -223,6 +266,7 @@
 ## Recommended Remediation Order
 
 ### Phase 1: Quick wins (no blockers) -- COMPLETED
+
 1. ~~**GAP-0027** -- Add `examples/` to Makefile fmt/check targets~~ Resolved
 2. ~~**GAP-0028** -- Add `examples/` to CONTRIBUTING.md project structure tree~~ Resolved
 3. ~~**GAP-0032** -- Update ROADMAP.md issue #19 status to Closed~~ Resolved
@@ -230,57 +274,78 @@
 5. ~~**GAP-0034** -- Add authoritative-source notice to ROADMAP.md~~ Resolved
 
 ### Phase 1b: Test gaps (no blockers)
-6. ~~**GAP-0025** -- Add unit tests for render.zig (pure functions, easy to test)~~ Resolved
+
+1. ~~**GAP-0025** -- Add unit tests for render.zig (pure functions, easy to test)~~ Resolved
 
 ### Phase 2: Infrastructure (blocked)
-7. ~~**GAP-0004** -- Verify CI pipeline on runners~~ Resolved (pipeline 2406048174 passed all stages)
-8. ~~**GAP-0026** -- Add fuzz targets to source code~~ Resolved
+
+1. ~~**GAP-0004** -- Verify CI pipeline on runners~~ Resolved (pipeline 2406048174 passed all stages)
+2. ~~**GAP-0026** -- Add fuzz targets to source code~~ Resolved
 
 ### Phase 3: Platform (blocked) -- COMPLETED
-9. ~~**GAP-0010** -- Windows terminal improvements~~ Resolved (cross-platform comptime branching, real Windows API calls)
+
+1. ~~**GAP-0010** -- Windows terminal improvements~~ Resolved (cross-platform comptime branching, real Windows API calls)
 
 ### Phase 4: Feature work (deferred) -- COMPLETED
-10. ~~**GAP-0018** -- Real undo implementation~~ Resolved (bounded UndoStack in src/undo.zig, integrated into core.zig)
+
+1. ~~**GAP-0018** -- Real undo implementation~~ Resolved (bounded UndoStack in src/undo.zig, integrated into core.zig)
 
 ### Phase 5: New gaps (2026-03-24 sync)
-11. ~~**GAP-0035** -- Commit and push all working tree changes~~ Resolved (issue #87 closed)
-12. ~~**GAP-0036** -- Correct GAP-0024 resolution evidence line counts~~ Resolved (issue #88 closed)
-13. ~~**GAP-0037** -- Update stale test counts in GAP_ANALYSIS.md~~ Resolved (issue #89 closed)
+
+1. ~~**GAP-0035** -- Commit and push all working tree changes~~ Resolved (issue #87 closed)
+2. ~~**GAP-0036** -- Correct GAP-0024 resolution evidence line counts~~ Resolved (issue #88 closed)
+3. ~~**GAP-0037** -- Update stale test counts in GAP_ANALYSIS.md~~ Resolved (issue #89 closed)
 
 ### Phase 6: Post-resolution audit gaps (2026-03-24) -- COMPLETED
-14. ~~**GAP-0045** -- Fix Delete key collision with undo in Emacs mode (High, Bug)~~ Resolved (SyntheticKey.delete=0x04)
-15. ~~**GAP-0046** -- Fix Delete key dead binding in Vi insert mode (High, Bug)~~ Resolved (same root cause)
-16. ~~**GAP-0042** -- Add 5 missing modules to ARCHITECTURE.md (Medium, Docs)~~ Resolved
-17. ~~**GAP-0038** -- Add undo.zig to CONTRIBUTING.md tree (Low, Docs)~~ Resolved
-18. ~~**GAP-0039** -- Add Ctrl+_ to README Emacs keybindings (Low, Docs)~~ Resolved
-19. ~~**GAP-0040** -- Add u to README Vi keybindings (Low, Docs)~~ Resolved
-20. ~~**GAP-0041** -- Reduce core.zig below 800 lines or document exception (Low, Code Quality)~~ Resolved (justified in ARCHITECTURE.md)
-21. ~~**GAP-0043** -- Update ROADMAP.md stale issue statuses (Low, Docs)~~ Resolved
-22. ~~**GAP-0044** -- Add undo to README Features list (Low, Docs)~~ Resolved
+
+1. ~~**GAP-0045** -- Fix Delete key collision with undo in Emacs mode (High, Bug)~~ Resolved (SyntheticKey.delete=0x04)
+2. ~~**GAP-0046** -- Fix Delete key dead binding in Vi insert mode (High, Bug)~~ Resolved (same root cause)
+3. ~~**GAP-0042** -- Add 5 missing modules to ARCHITECTURE.md (Medium, Docs)~~ Resolved
+4. ~~**GAP-0038** -- Add undo.zig to CONTRIBUTING.md tree (Low, Docs)~~ Resolved
+5. ~~**GAP-0039** -- Add Ctrl+_ to README Emacs keybindings (Low, Docs)~~ Resolved
+6. ~~**GAP-0040** -- Add u to README Vi keybindings (Low, Docs)~~ Resolved
+7. ~~**GAP-0041** -- Reduce core.zig below 800 lines or document exception (Low, Code Quality)~~ Resolved (justified in ARCHITECTURE.md)
+8. ~~**GAP-0043** -- Update ROADMAP.md stale issue statuses (Low, Docs)~~ Resolved
+9. ~~**GAP-0044** -- Add undo to README Features list (Low, Docs)~~ Resolved
 
 ### Phase 7: Validation audit finding (2026-03-24) -- COMPLETED
-23. ~~**GAP-0047** -- Add config.zig to ARCHITECTURE.md (Low, Docs)~~ Resolved
+
+1. ~~**GAP-0047** -- Add config.zig to ARCHITECTURE.md (Low, Docs)~~ Resolved
 
 ### Phase 8: Validation audit -- docs staleness (2026-03-24) -- COMPLETED (except GAP-0052 blocked)
-24. ~~**GAP-0048** -- Update ROADMAP.md issue #15 status to Closed (Low, Docs)~~ Resolved (issue #107 closed)
-25. ~~**GAP-0049** -- Add 5 missing files to CONTRIBUTING.md docs/ tree (Low, Docs)~~ Resolved (issue #108 closed)
-26. ~~**GAP-0050** -- Remove closed issues #1, #15 from README Current Priorities (Low, Docs)~~ Resolved (issue #109 closed)
-27. ~~**GAP-0051** -- Remove closed issues #15, #21 from README Contributing section (Low, Docs)~~ Resolved (issue #109 closed)
-28. **GAP-0052** -- Resolve SECURITY.md release signing: tags signed but docs and CI enforcement missing (Medium, Security) -- [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (open/partial)
+
+1. ~~**GAP-0048** -- Update ROADMAP.md issue #15 status to Closed (Low, Docs)~~ Resolved (issue #107 closed)
+2. ~~**GAP-0049** -- Add 5 missing files to CONTRIBUTING.md docs/ tree (Low, Docs)~~ Resolved (issue #108 closed)
+3. ~~**GAP-0050** -- Remove closed issues #1, #15 from README Current Priorities (Low, Docs)~~ Resolved (issue #109 closed)
+4. ~~**GAP-0051** -- Remove closed issues #15, #21 from README Contributing section (Low, Docs)~~ Resolved (issue #109 closed)
+5. **GAP-0052** -- Resolve SECURITY.md release signing: tags signed but docs and CI enforcement missing (Medium, Security) -- [#31](https://gitlab.com/devnw/zig/repl/-/issues/31) (open/partial)
 
 ### Phase 9: Full audit findings (2026-03-24) -- COMPLETED
-29. ~~**GAP-0053** -- Update stale test count in GAP_ANALYSIS.md (Low, Docs)~~ Resolved
-30. ~~**GAP-0054** -- Add 10 root-level files to CONTRIBUTING.md project tree (Low, Docs)~~ Resolved
-31. ~~**GAP-0055** -- Add Gitleaks to SECURITY.md CI scanning list (Low, Security)~~ Resolved
-32. ~~**GAP-0056** -- Add SBOM to SECURITY.md CI scanning list (Low, Security)~~ Resolved
-33. ~~**GAP-0057** -- Add SyntheticKey to README API Reference (Low, Docs)~~ Resolved
-34. ~~**GAP-0058** -- Fix minimum Zig version inconsistency (Low, Docs)~~ Resolved
+
+1. ~~**GAP-0053** -- Update stale test count in GAP_ANALYSIS.md (Low, Docs)~~ Resolved
+2. ~~**GAP-0054** -- Add 10 root-level files to CONTRIBUTING.md project tree (Low, Docs)~~ Resolved
+3. ~~**GAP-0055** -- Add Gitleaks to SECURITY.md CI scanning list (Low, Security)~~ Resolved
+4. ~~**GAP-0056** -- Add SBOM to SECURITY.md CI scanning list (Low, Security)~~ Resolved
+5. ~~**GAP-0057** -- Add SyntheticKey to README API Reference (Low, Docs)~~ Resolved
+6. ~~**GAP-0058** -- Fix minimum Zig version inconsistency (Low, Docs)~~ Resolved
 
 ### Phase 10: Documentation and quality cleanup (2026-03-25) -- COMPLETED
-35. ~~**GAP-0060** -- Add v0.1.1 entry to CHANGELOG.md and fix broken links (Medium, Docs)~~ Resolved (issue #114)
-36. ~~**GAP-0062** -- Update CONTRIBUTING.md Zig version from 0.14.0 to 0.15.0 (Low, Docs)~~ Resolved (issue #112)
-37. ~~**GAP-0065** -- Update README and CONTRIBUTING.md format check commands (Low, Docs)~~ Resolved (issue #118)
-38. ~~**GAP-0059** -- Add 8 missing public items to README API Reference (Low, Docs)~~ Resolved (issue #113)
-39. ~~**GAP-0063** -- Consolidate duplicate CONTRIBUTING.md files (Low, Docs)~~ Resolved (issue #116)
-40. ~~**GAP-0061** -- Update stale copyright years and unify entity name (Low, Docs/Legal)~~ Resolved (issue #115)
-41. ~~**GAP-0064** -- Clean up .gitignore to Zig-only rules (Low, Code Quality)~~ Resolved (issue #117)
+
+1. ~~**GAP-0060** -- Add v0.1.1 entry to CHANGELOG.md and fix broken links (Medium, Docs)~~ Resolved (issue #114)
+2. ~~**GAP-0062** -- Update CONTRIBUTING.md Zig version from 0.14.0 to 0.15.0 (Low, Docs)~~ Resolved (issue #112)
+3. ~~**GAP-0065** -- Update README and CONTRIBUTING.md format check commands (Low, Docs)~~ Resolved (issue #118)
+4. ~~**GAP-0059** -- Add 8 missing public items to README API Reference (Low, Docs)~~ Resolved (issue #113)
+5. ~~**GAP-0063** -- Consolidate duplicate CONTRIBUTING.md files (Low, Docs)~~ Resolved (issue #116)
+6. ~~**GAP-0061** -- Update stale copyright years and unify entity name (Low, Docs/Legal)~~ Resolved (issue #115)
+7. ~~**GAP-0064** -- Clean up .gitignore to Zig-only rules (Low, Code Quality)~~ Resolved (issue #117)
+
+### Phase 11: Audit Cycle 3 findings (2026-06-12)
+
+1. ~~**GAP-0066** -- Config files written world-readable; no-op chmod + missing .permissions (High, Security)~~ Resolved (commit ec9a1dc, issue #122)
+2. ~~**GAP-0067** -- History permission enforcement on pre-existing files removed (Medium, Security)~~ Resolved (commit ec9a1dc, issue #123)
+3. ~~**GAP-0068** -- compat.chmod is a silent no-op (Low, Security)~~ Resolved (commit ec9a1dc, issue #126)
+4. ~~**GAP-0069** -- sync_diamond_deps --cascade --apply blast radius (Medium, Security)~~ Resolved (commit 5eae04d, issue #124)
+5. ~~**GAP-0070** -- Observability seam hardcoded enabled=false (Low, Code Quality)~~ Resolved (commit cf50500, issues #127/#140)
+6. ~~**GAP-0071** -- Docker base image not digest-pinned (Low, CI-CD)~~ Resolved (commit cf50500, issue #133)
+7. ~~**GAP-0072** -- processInput zero direct tests (Medium, Test)~~ Resolved (commit d039c05, issue #52)
+8. **GAP-0073** -- API docs partial; no generated/published docs (Low, Docs) -- [#20](https://gitlab.com/devnw/zig/repl/-/issues/20) (open/deferred)

@@ -1,9 +1,9 @@
 # Quality Gap Analysis -- Zig REPL Library
 
 **Project**: gitlab.com/devnw/zig/repl
-**Last updated**: 2026-03-25 (Phase 25 -- Gap Closure: 5 resolved, 1 won't-do; QF-067, QF-073, QF-082, QF-088, QF-090 resolved; QF-089 won't-do)
-**Audit phase**: Phase 25 (Gap Closure)
-**Total findings**: 88 (5 won't-do, 71 resolved, 1 accepted, 10 open, 1 partial)
+**Last updated**: 2026-06-12 (Audit Cycle 3 -- Re-Review: 6 resolved (dead-code #136 + Q1/Q5, Q2, Q3, Q7, Q8), 8 new tracked Low/backlog; QF-091..QF-098 added; issue #136 closed)
+**Audit phase**: Audit Cycle 3 (Re-Review, branch `audit-cycle-3-gap-closure`)
+**Total findings**: 95 (5 won't-do, 73 resolved, 1 accepted, 15 open, 1 partial) -- QF-097 split into 4 sub-items (097a-d); QF-068 rejected (duplicate, not counted)
 
 ---
 
@@ -14,9 +14,9 @@
 | Severity | Count | PriorityScore Range |
 |----------|-------|---------------------|
 | Critical | 0     | --                  |
-| High     | 1     | 85                  |
-| Medium   | 1     | 40                  |
-| Low      | 9     | 12-20               |
+| High     | 1     | 85 (partial: QF-026)|
+| Medium   | 1     | 40 (accepted: QF-050)|
+| Low      | 15    | 12-20               |
 
 ### Severity Distribution (All, Including Resolved)
 
@@ -24,8 +24,8 @@
 |----------|---------------|------|---------|----------|----------|----------|
 | Critical | 6             | 0    | 0       | 0        | 0        | 6        |
 | High     | 13            | 0    | 1       | 0        | 0        | 12       |
-| Medium   | 26            | 0    | 0       | 2        | 1        | 23       |
-| Low      | 43            | 9    | 0       | 2        | 0        | 32       |
+| Medium   | 27            | 0    | 0       | 3        | 1        | 23       |
+| Low      | 49            | 15   | 0       | 2        | 0        | 32       |
 
 ### Top Open/Partial/Accepted Risks
 
@@ -33,7 +33,7 @@
 2. **core.zig at ~878 non-test lines** (QF-050, Score 40) -- Growth justified by undo integration; documented in ARCHITECTURE.md size note. Accepted.
 3. **platform.zig regressed to 948 lines** (QF-083, Score 20) -- Was 796 after QF-042; regressed past 800-line guideline due to SIGWINCH handler + cached terminal width (PF-021/PF-040). Continuing regression.
 
-Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search.zig test coverage: 16 test blocks added, issue #119 closed), QF-073 (parseKeyEvent nesting reduced from 7 to 3 via helper extraction), QF-082 (search.zig multi-byte ESC sequence detection via index-based while loop), QF-088 (dead last_was_kill assignments fixed by adding to post-switch guard exception list), QF-090 (resolveEnvOverridePath bounds checks added at text_utils.zig:172,176; 2 new tests; issue #121 closed). QF-089 (Vi insert mode Ctrl+R) marked Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search. Phase 24 (Audit Cycle 2, Phase 4) added 3 new findings: QF-088 (Low, dead code -- `last_was_kill = true` in delete_word/delete_word_backward immediately cleared by post-switch guard), QF-089 (Low, Vi insert mode missing Ctrl+R reverse search binding), QF-090 (Medium, resolveEnvOverridePath missing bounds check on app_name length). All 13 prior open items confirmed still valid and unchanged. Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF-087): QF-084 (doc comments added to 6 public functions in completion.zig, config.zig, core.zig), QF-085 (6 new tests for config.zig: loadFromFile, saveToFile, round-trip, getDefaultConfigPath), QF-086 (resolveEnvOverridePath extracted to text_utils.zig, deduplicating ~50 lines), QF-087 (handleSearch ESC/Ctrl+C reset history_index to null; Enter preserves position). Phase 23 intake added 4 new findings (QF-084 through QF-087) from quality-reviewer. All Low severity. Phase 21 added 15 new validated findings (QF-067 through QF-083; QF-068 rejected as duplicate of PF-038). 1 High (search.zig test gap), 14 Low (readability, consistency, correctness). Phase 20 resolved QF-065 (isStderrTty re-export) and QF-066 (delete_char_forward test). Phase 19 added 27 processAction unit tests (QF-026 Deferred->Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
+Audit Cycle 3 (Re-Review, 2026-06-12, branch `audit-cycle-3-gap-closure`) resolved 6 findings and added 8 new tracked Low/backlog items (QF-091..QF-098). RESOLVED this cycle: dead-code #136/QF-091 (15 zero-caller migration stubs deleted from compat.zig, -172 lines, commit ec9a1dc, issue #136 closed); QF-092/Q1+Q5 (otel contract blast radius -- README/repl docs/tests/CI all claimed working telemetry that was a no-op; seam restored, enabled test runs, CI test-with-otel job added, docs now truthful, commit cf50500, relates to #127/#140); QF-093/Q2 (version drift repl.version 0.1.0 vs manifest 0.1.7 -- now single-sourced from build.zig.zon via build_options + drift test, commit cf50500); QF-094/Q3 (compat anytype flag-drop -- cwdCreateFile now forwards .read/.truncate/.exclusive/.permissions; unused cwdOpenFile/cwdOpenDir helpers deleted, commit ec9a1dc); QF-095/Q7 (Config.saveToFile non-atomic truncate-before-write -- now temp-file + atomic rename, commit ec9a1dc); QF-096/Q8 (compat.zig had no removal-plan marker -- TEMPORARY-migration-shim banner added, commit ec9a1dc). NEW tracked Low/backlog (issues already filed, NOT new on next re-review): #137/QF-097a (handleCommandSubmission 70 lines >50 guideline), #138/QF-097b (HistoryStore.load 60 lines), #139/QF-097c (handleNormalMode re-grew toward 164 lines -- QF-004 resolved-item regrowth; current body 158 lines, monitor), #141/QF-097d (sync_diamond_deps.py cascade() 162 lines, scripts), QF-098/Q4 (observability error_kind contract doc inconsistency -- bounded-category doc vs unbounded @errorName caller; relates to #140, the dead -Dwith_otel path), and Q6 history append cross-process race / non-O_APPEND positional write (single-process documented limitation, folded into QF-079 monitoring). Pre-existing readability regressions QF-070..079/083 remain tracked-open (monitor); current line counts re-verified this cycle. All 315/315 tests pass; no regressions. Prior Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search.zig test coverage: 16 test blocks added, issue #119 closed), QF-073 (parseKeyEvent nesting reduced from 7 to 3 via helper extraction), QF-082 (search.zig multi-byte ESC sequence detection via index-based while loop), QF-088 (dead last_was_kill assignments fixed by adding to post-switch guard exception list), QF-090 (resolveEnvOverridePath bounds checks added at text_utils.zig:172,176; 2 new tests; issue #121 closed). QF-089 (Vi insert mode Ctrl+R) marked Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search. Phase 24 (Audit Cycle 2, Phase 4) added 3 new findings: QF-088 (Low, dead code -- `last_was_kill = true` in delete_word/delete_word_backward immediately cleared by post-switch guard), QF-089 (Low, Vi insert mode missing Ctrl+R reverse search binding), QF-090 (Medium, resolveEnvOverridePath missing bounds check on app_name length). All 13 prior open items confirmed still valid and unchanged. Phase 23 closure resolved all 4 findings from Phase 23 intake (QF-084 through QF-087): QF-084 (doc comments added to 6 public functions in completion.zig, config.zig, core.zig), QF-085 (6 new tests for config.zig: loadFromFile, saveToFile, round-trip, getDefaultConfigPath), QF-086 (resolveEnvOverridePath extracted to text_utils.zig, deduplicating ~50 lines), QF-087 (handleSearch ESC/Ctrl+C reset history_index to null; Enter preserves position). Phase 23 intake added 4 new findings (QF-084 through QF-087) from quality-reviewer. All Low severity. Phase 21 added 15 new validated findings (QF-067 through QF-083; QF-068 rejected as duplicate of PF-038). 1 High (search.zig test gap), 14 Low (readability, consistency, correctness). Phase 20 resolved QF-065 (isStderrTty re-export) and QF-066 (delete_char_forward test). Phase 19 added 27 processAction unit tests (QF-026 Deferred->Partial); closed QF-018 and QF-019 as Won't Do (intentional consumer-facing APIs). Phase 18 resolved QF-064. Phase 17 resolved QF-058 through QF-063 and accepted QF-050.
 
 ---
 
@@ -67,9 +67,14 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | 22 | QF-080 | Low | 12 | Consistency | Vi 'O' `catch {}` inconsistent with QF-061 fix | keymap_vi.zig | L131: `state.buffer.insert(state.allocator, 0, '\n') catch {};` -- QF-061 changed Vi `o` from `catch {}` to `catch return .vi_insert_mode`; `O` was not updated to match | -- | Changed `catch {}` to `catch return .vi_insert_mode` at keymap_vi.zig:131 for consistency with `o` handler | Maintainers | S | Resolved |
 | 23 | QF-088 | Low | 8 | Cleanup | Dead code: `last_was_kill = true` in delete_word/delete_word_backward immediately cleared | core.zig | L635: `.delete_word` sets `state.last_was_kill = true`; L652: `.delete_word_backward` sets `state.last_was_kill = true`; L763: post-switch guard `if (action != .delete_to_eol and action != .delete_to_bol) { state.last_was_kill = false; }` immediately clears both. Only `.delete_to_eol` and `.delete_to_bol` survive the guard. | -- | Added `.delete_word` and `.delete_word_backward` to post-switch guard exception list for Emacs kill-ring accumulation semantics; updated 2 tests to assert `last_was_kill == true` | Maintainers | S | Resolved |
 | 24 | QF-089 | Low | 8 | Consistency | Vi insert mode missing Ctrl+R (reverse search) binding | keymap_vi.zig | L348-369: Vi insert mode Ctrl-key switch has no `'r' => .search` case. Emacs mode maps Ctrl+R to `.search` (keymap_emacs.zig). Vi normal mode has `/` for search. | -- | Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search | Maintainers | S | Won't Do |
+| 25 | QF-097a | Low | 12 | Readability | handleCommandSubmission 70 lines (>50 guideline) | core.zig | `fn handleCommandSubmission` at core.zig:815-884 = 70 lines (>50 guideline) | [#137](https://gitlab.com/devnw/zig/repl/-/issues/137) | Extract command-dispatch / history-append blocks into helpers | Maintainers | S | Open |
+| 26 | QF-097b | Low | 12 | Readability | HistoryStore.load 60 lines (>50 guideline) | history.zig | `pub fn load` at history.zig:77 (incl. doc comments); function body span ~60 lines (>50 guideline) | [#138](https://gitlab.com/devnw/zig/repl/-/issues/138) | Extract line-filtering / persistence loop into a private helper | Maintainers | S | Open |
+| 27 | QF-097c | Low | 12 | Readability | handleNormalMode regrowth toward 164 lines (QF-004 resolved-item regrowth) | keymap_vi.zig | `fn handleNormalMode` at keymap_vi.zig:57-214; current body 158 lines (QF-004 resolved at 158; issue #139 flags drift toward 164). Monitor. | [#139](https://gitlab.com/devnw/zig/repl/-/issues/139) | Monitor; re-extract motion helpers if it passes 164 lines again | Maintainers | S | Open |
+| 28 | QF-097d | Low | 12 | Readability | sync_diamond_deps.py cascade() 162 lines | scripts/sync_diamond_deps.py | `def cascade(` at scripts/sync_diamond_deps.py:600; per-repo processing block extractable as helper (~162 lines tracked) | [#141](https://gitlab.com/devnw/zig/repl/-/issues/141) | Extract per-repo processing block into a helper function | Maintainers | S | Open |
+| 29 | QF-098 | Low | 12 | Documentation | observability error_kind contract doc inconsistency (bounded-category doc vs unbounded @errorName caller) | observability.zig | Doc describes `error_kind` as a bounded enumerated category, but caller emits unbounded `@errorName(err)`; cardinality/contract mismatch. Residual nuance on the otel seam restored in cf50500 ([#140](https://gitlab.com/devnw/zig/repl/-/issues/140) closed). Surface is dormant (enabled=false by default) so no runtime impact today. Doc-only tracking per Low-severity policy. | -- (doc-only) | Either bound `error_kind` to a documented category set or update the doc to state it is the raw error name; align when the otel seam is enabled by default | Maintainers | S | Open |
 | 3 | QF-053 | High | 60 | ErrorHandling | flushPasteBuffer `catch {}` on insertSlice silently loses paste + cursor invariant violated | core.zig | L470: `insertSlice(...) catch {}`; L471: `cursor += sanitized.len` runs regardless of insert success | [#93](https://gitlab.com/devnw/zig/repl/-/issues/93) | Changed `catch {}` to `catch return` so cursor advancement is guarded on insertSlice success | Maintainers | S | Resolved |
 | 4 | QF-052 | Medium | 48 | Correctness | handleSearch reads 256 bytes but processes only search_buf[0], discarding bytes 1..n | core.zig | L802-808: `const n = try stdin.read(&search_buf)` then `const c = search_buf[0]`; bytes 1..n lost | [#92](https://gitlab.com/devnw/zig/repl/-/issues/92) | Wrapped character processing in `for (search_buf[0..n])` loop; all bytes now processed | Maintainers | S | Resolved |
-| 7 | QF-051 | Medium | 36 | Readability | processAction 231 lines; .complete (47 LOC, depth 6) and .reverse_tab (27 LOC, depth 6) | core.zig | L563-793: `awk '/^fn processAction/,/^}/' | wc -l` = 231; .complete L721-766; .reverse_tab L583-608 | [#91](https://gitlab.com/devnw/zig/repl/-/issues/91) | Extracted handleCompletion() and handleUnindent(); processAction now 159 lines (target was <180) | Maintainers | S | Resolved |
+| 7 | QF-051 | Medium | 36 | Readability | processAction 231 lines; .complete (47 LOC, depth 6) and .reverse_tab (27 LOC, depth 6) | core.zig | L563-793: `awk '/^fn processAction/,/^}/' \| wc -l` = 231; .complete L721-766; .reverse_tab L583-608 | [#91](https://gitlab.com/devnw/zig/repl/-/issues/91) | Extracted handleCompletion() and handleUnindent(); processAction now 159 lines (target was <180) | Maintainers | S | Resolved |
 | 8 | QF-054 | Low | 28 | Build | apt-get runs redundantly in all 7 CI jobs referencing install-zig anchor | .gitlab-ci.yml | L49: `apt-get update && apt-get install -y curl xz-utils` outside cache guard; 7 refs at L83,90,99,110,121,132,143 | [#94](https://gitlab.com/devnw/zig/repl/-/issues/94) | Moved apt-get inside cache guard with `command -v` check; runs only when Zig not cached and tools missing | Maintainers | S | Resolved |
 | -- | QF-004 | Medium | 45 | Readability | handleNormalMode reduced to 158 lines | keymap_vi.zig | Extracted `handlePendingOperator` (d/c/r operators); handleNormalMode reduced from 257 to 158 lines | [#56](https://gitlab.com/devnw/zig/repl/-/issues/56) | Extracted `handlePendingOperator` function; handleNormalMode now 158 lines (target was <200) | Maintainers | M | Resolved |
 | -- | QF-048 | Medium | 40 | Build | CI downloads Zig tarball 7x per pipeline, no cache | .gitlab-ci.yml | 7 `*install-zig` refs (lines 79,86,95,106,117,128,139); no `cache:` block; ~315 MB/pipeline | [#84](https://gitlab.com/devnw/zig/repl/-/issues/84) | Add `cache:` block with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Maintainers | S | Resolved |
@@ -95,6 +100,12 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 
 | Rank | QF-ID | Severity | Score | Category | Finding | Component | Issue | Resolution | Status |
 |------|-------|----------|-------|----------|---------|-----------|-------|------------|--------|
+| -- | QF-091 | Low | 16 | Cleanup | Dead code: 15 zero-caller migration stubs in compat.zig (~172 lines) | compat.zig | [#136](https://gitlab.com/devnw/zig/repl/-/issues/136) (closed) | Deleted all 15 stubs (seekTo, seekFromEnd, writev, dirIterate, closeDir, cwdMakePath, cwdDeleteFile, cwdDeleteTree, cwdStatFile, dirRealpathAlloc, cwdOpenFile, cwdOpenDir, closeFile, getEndPos, readAll); commit ec9a1dc (-172 lines). grep for each stub now returns 0 matches. | Resolved |
+| -- | QF-092 | High | 60 | APIContract | otel contract blast radius: README/repl docs/tests/CI claimed working telemetry that was a no-op | observability.zig, README.md, .gitlab-ci.yml | -- (relates [#127](https://gitlab.com/devnw/zig/repl/-/issues/127), [#140](https://gitlab.com/devnw/zig/repl/-/issues/140)) | Restored the observability seam, enabled test runs, added a CI `test-with-otel` job, and corrected docs to be truthful about telemetry status; commit cf50500. (Q1/Q5) | Resolved |
+| -- | QF-093 | Medium | 36 | Consistency | Version drift: repl.version 0.1.0 vs manifest 0.1.7 | build.zig, build.zig.zon | -- | Version now single-sourced from build.zig.zon via `build_options` + a drift test guarding the two stay in sync; commit cf50500. (Q2) | Resolved |
+| -- | QF-094 | Medium | 36 | Correctness | compat anytype flag-drop: cwdCreateFile/cwdOpenFile/cwdOpenDir silently dropped caller flags | compat.zig | -- | cwdCreateFile now forwards `.read`/`.truncate`/`.exclusive`/`.permissions`; unused cwdOpenFile/cwdOpenDir helpers deleted; commit ec9a1dc. (Q3) | Resolved |
+| -- | QF-095 | Medium | 48 | ErrorHandling | Config.saveToFile non-atomic (truncate-before-write could destroy config) | config.zig | -- | saveToFile now writes to `<path>.tmp` then atomic-renames into place, so a crash mid-write no longer destroys the existing config; commit ec9a1dc. (Q7) | Resolved |
+| -- | QF-096 | Low | 16 | Documentation | compat.zig had no removal-plan marker | compat.zig | -- | Added a TEMPORARY-migration-shim banner documenting that compat.zig is a transitional shim slated for removal; commit ec9a1dc. (Q8) | Resolved |
 | -- | QF-069 | Low | 20 | Readability | 9 unreachable `catch {}` on shrinking replaceRange | core.zig, keymap_vi.zig | -- | All 9 `catch {}` changed to `catch unreachable` with safety comment | Resolved |
 | -- | QF-080 | Low | 12 | Consistency | Vi 'O' `catch {}` inconsistent with QF-061 fix | keymap_vi.zig | -- | Changed `catch {}` to `catch return .vi_insert_mode` at keymap_vi.zig:131 | Resolved |
 | -- | QF-066 | High | 60 | Testing | processAction delete_char_forward untested | core.zig | -- | Added dedicated test for delete_char_forward action; verifies character removal at cursor and cursor stability | Resolved |
@@ -181,6 +192,10 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | QF-079 | 12 | Low | history.zig append 69 lines (L126-194) | Open |
 | QF-044 | 16 | Low | renderPrompt bare `[8192]u8` magic number | Resolved |
 | QF-045 | 16 | Low | paste_buf bare `[4096]u8` magic number | Resolved |
+| QF-097a | 12 | Low | handleCommandSubmission 70 lines (>50 guideline) -- [#137](https://gitlab.com/devnw/zig/repl/-/issues/137) | Open |
+| QF-097b | 12 | Low | HistoryStore.load 60 lines (>50 guideline) -- [#138](https://gitlab.com/devnw/zig/repl/-/issues/138) | Open |
+| QF-097c | 12 | Low | handleNormalMode regrowth toward 164 lines (QF-004 regression, body currently 158) -- [#139](https://gitlab.com/devnw/zig/repl/-/issues/139) | Open |
+| QF-097d | 12 | Low | sync_diamond_deps.py cascade() 162 lines (scripts) -- [#141](https://gitlab.com/devnw/zig/repl/-/issues/141) | Open |
 
 ### Duplication (0 open findings)
 
@@ -214,6 +229,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | QF-015 | 80 | High | .undo replaces buffer with kill ring -- real undo stack implemented (GAP-0018) | Resolved |
 | QF-058 | 60 | High | handleCompletion insertSlice catch {} advances cursor on OOM -- changed to catch return | Resolved |
 | QF-053 | 60 | High | flushPasteBuffer `catch return` guards cursor on OOM | Resolved |
+| QF-095 | 48 | Medium | Config.saveToFile non-atomic truncate-before-write (Q7) -- now temp-file + atomic rename (commit ec9a1dc) | Resolved |
 | QF-014 | 45 | Medium | Vi kill ring catch {} on alloc | Won't Do |
 | QF-061 | 20 | Low | Vi `o` cursor advance after append catch {} -- changed to catch return | Resolved |
 | QF-062 | 16 | Low | allocator.dupe catch "" loses prefix on OOM -- changed to catch return | Resolved |
@@ -223,6 +239,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-094 | 36 | Medium | compat anytype flag-drop: cwdCreateFile/cwdOpenFile/cwdOpenDir silently dropped caller flags (Q3) -- cwdCreateFile now forwards flags; unused helpers deleted (commit ec9a1dc) | Resolved |
 | QF-059 | 48 | Medium | delete_word (Alt+D) missing kill ring save -- kill ring save added | Resolved |
 | QF-052 | 48 | Medium | handleSearch now processes all bytes from stdin.read via `for (search_buf[0..n])` loop | Resolved |
 | QF-090 | 20 | Medium | resolveEnvOverridePath missing bounds check: `app_name > 256` panics in Debug, UB in ReleaseFast -- [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | Resolved |
@@ -234,6 +251,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-093 | 36 | Medium | Version drift repl.version 0.1.0 vs manifest 0.1.7 (Q2) -- single-sourced from build.zig.zon via build_options + drift test (commit cf50500) | Resolved |
 | QF-060 | 24 | Low | Inconsistent try vs catch {} for kill_ring.appendSlice -- changed to catch {} for consistency | Resolved |
 | QF-035 | 60 | Medium | Vi dw/db/de orderedRemove replaced with replaceRange | Resolved |
 | QF-080 | 12 | Low | Vi 'O' `catch {}` changed to `catch return .vi_insert_mode` for consistency with QF-061 fix for 'o' (keymap_vi.zig:131) | Resolved |
@@ -249,10 +267,11 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | QF-049 | 24 | Low | Makefile/pre-commit omit examples/ from fmt targets | Resolved |
 | QF-037 | 45 | Low | Makefile lib/ references and error suppression removed | Resolved |
 
-### Cleanup (1 open finding)
+### Cleanup (0 open findings)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-091 | 16 | Low | Dead code: 15 zero-caller migration stubs in compat.zig (~172 lines) deleted -- [#136](https://gitlab.com/devnw/zig/repl/-/issues/136) closed (commit ec9a1dc) | Resolved |
 | QF-088 | 8 | Low | Dead code: `last_was_kill = true` in delete_word (L635) and delete_word_backward (L652) immediately cleared by post-switch guard at L763 | Resolved |
 | QF-063 | 8 | Low | Unused import `history_mod` in search.zig -- deleted | Resolved |
 | QF-064 | 8 | Low | Unused `builtin` import in core.zig -- deleted | Resolved |
@@ -270,13 +289,16 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-092 | 60 | High | otel contract blast radius: README/repl docs/tests/CI claimed working telemetry that was a no-op (Q1/Q5) -- seam restored, CI test-with-otel job, docs truthful (commit cf50500); relates #127/#140 | Resolved |
 | QF-065 | 20 | Low | repl.zig missing isStderrTty re-export -- added pub const re-export | Resolved |
 | QF-041 | 25 | Low | config.saveToFile allocator documented as reserved for future use | Resolved |
 
-### Documentation (0 open findings)
+### Documentation (1 open finding)
 
 | QF-ID | Score | Severity | Summary | Status |
 |-------|-------|----------|---------|--------|
+| QF-098 | 12 | Low | observability error_kind contract doc inconsistency (bounded-category doc vs unbounded @errorName caller); residual nuance on otel seam, dormant by default -- [#140](https://gitlab.com/devnw/zig/repl/-/issues/140) closed, doc-only tracking | Open |
+| QF-096 | 16 | Low | compat.zig had no removal-plan marker (Q8) -- TEMPORARY-migration-shim banner added (commit ec9a1dc) | Resolved |
 | QF-084 | 12 | Low | 6 public functions now have `///` doc comments in completion.zig, config.zig, core.zig | Resolved |
 
 ---
@@ -303,6 +325,11 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | QF-076 | 12 | Monitor handleInsertMode; near 50-line guideline but structurally simple | -- | Open |
 | QF-078 | 12 | Monitor processInput; under 80 lines but trending upward | -- | Open |
 | QF-079 | 12 | Extract file persistence from history.zig append | -- | Open |
+| QF-097a | 12 | Extract command-dispatch/history-append blocks from handleCommandSubmission | [#137](https://gitlab.com/devnw/zig/repl/-/issues/137) | Open |
+| QF-097b | 12 | Extract line-filtering/persistence loop from HistoryStore.load | [#138](https://gitlab.com/devnw/zig/repl/-/issues/138) | Open |
+| QF-097c | 12 | Monitor handleNormalMode; re-extract motion helpers if >164 lines | [#139](https://gitlab.com/devnw/zig/repl/-/issues/139) | Open |
+| QF-097d | 12 | Extract per-repo processing block from sync_diamond_deps.py cascade() | [#141](https://gitlab.com/devnw/zig/repl/-/issues/141) | Open |
+| QF-098 | 12 | Bound error_kind to documented category set or correct the doc; align when otel seam enabled by default | -- (doc-only) | Open |
 | QF-084 | 12 | `///` doc comments added to 6 public functions in completion.zig, config.zig, core.zig | -- | Resolved |
 | QF-087 | 12 | Split ESC from Enter/newline; ESC and Ctrl+C reset `history_index = null`; Enter preserves position. 6 tests added for display helper. | -- | Resolved |
 | QF-080 | 12 | Changed Vi 'O' `catch {}` to `catch return .vi_insert_mode` for consistency | -- | Resolved |
@@ -382,6 +409,12 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | [#111](https://gitlab.com/devnw/zig/repl/-/issues/111) | Bug: delete_word (Alt+D) missing kill ring save (QF-059) | QF-059 (Resolved, issue closed) |
 | [#119](https://gitlab.com/devnw/zig/repl/-/issues/119) | QF-067: search.zig zero test coverage (73 lines, 0 tests) | QF-067 (Resolved) |
 | [#121](https://gitlab.com/devnw/zig/repl/-/issues/121) | QF-090: resolveEnvOverridePath missing bounds check on app_name length | QF-090 (Resolved) |
+| [#136](https://gitlab.com/devnw/zig/repl/-/issues/136) | Dead code: 15 pub fn migration stubs in compat.zig have zero callers | QF-091 (Resolved, issue closed -- commit ec9a1dc) |
+| [#137](https://gitlab.com/devnw/zig/repl/-/issues/137) | Quality: handleCommandSubmission 72 lines | QF-097a (Open) |
+| [#138](https://gitlab.com/devnw/zig/repl/-/issues/138) | Quality: HistoryStore.load 60 lines | QF-097b (Open) |
+| [#139](https://gitlab.com/devnw/zig/repl/-/issues/139) | Quality: handleNormalMode re-grew to 164 lines (QF-004 regression) | QF-097c (Open) |
+| [#140](https://gitlab.com/devnw/zig/repl/-/issues/140) (closed) | Quality: build.zig wires observability_init under -Dwith_otel but observability.zig hardcodes enabled=false | QF-092 (Resolved -- seam restored cf50500); QF-098 (Open -- residual error_kind doc/contract nuance, doc-only) |
+| [#141](https://gitlab.com/devnw/zig/repl/-/issues/141) | Quality: sync_diamond_deps.py cascade() 162 lines | QF-097d (Open) |
 
 ### Pre-existing Related Issues
 
@@ -417,6 +450,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | processInput size | 216 lines | 53 lines | -163 (improved) |
 
 **Key observations:**
+
 - 16 additional findings resolved in gap closure wave (14 closed + 2 won't-do).
 - Critical findings reduced to 0 (QF-032 signal handlers resolved).
 - core.zig reduced from 1114 to 799 lines (under 800-line guideline) via extraction of input.zig, render.zig, and text_utils.zig.
@@ -454,6 +488,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | Highest open score | 85 | 85 (QF-026, deferred) | 0 |
 
 **Key observations:**
+
 - 9 additional findings resolved in final closure wave (QF-004, QF-042..QF-049).
 - All remaining open items are explicitly deferred with documented rationale.
 - QF-004 (handleNormalMode 261 lines) resolved via handlePendingOperator extraction (158 lines).
@@ -481,6 +516,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | processAction lines | ~228 (QF-003 resolution) | 231 | +3 (stable) |
 
 **Key observations:**
+
 - 5 new findings from Phase 11 quality-reviewer pass.
 - 1 High-severity finding (QF-053): flushPasteBuffer `catch {}` silently loses pasted content and violates cursor invariant. This is the highest-priority new item.
 - 1 Medium correctness finding (QF-052): handleSearch discards bytes 1..n from multi-byte reads. Silent data loss during search.
@@ -510,6 +546,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | processAction lines | 231 | 159 | -72 (improved) |
 
 **Key observations:**
+
 - All 5 findings from Phase 11 (QF-050 through QF-054) resolved and GitLab issues closed.
 - QF-053 (flushPasteBuffer catch return) -- highest priority fix -- cursor invariant violation eliminated.
 - QF-052 (handleSearch multi-byte) -- silent data loss in search mode eliminated.
@@ -535,6 +572,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | New issues created | -- | 3 (#104, #105, #106) | +3 |
 
 **Key observations:**
+
 - 3 new findings from Phase 3 deep review of undo stack and key handling.
 - QF-055 (Score 8, Low): Memory leak on rare OOM path in UndoStack.push -- missing `errdefer` after `allocator.dupe()`. Quick fix, extremely rare trigger.
 - QF-056 (Score 36, Medium): No integration tests for undo functionality. The Delete key collision (GAP-0045) would have been caught by such tests. Medium effort due to test harness dependency.
@@ -561,6 +599,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | core.zig non-test lines | 801 | ~878 | +77 (regression) |
 
 **Key observations:**
+
 - 6 new findings (QF-058 through QF-063) from Phase 16 quality-reviewer pass.
 - 1 regression (QF-050): core.zig grew from 801 to ~878 non-test lines due to undo integration. Issue #90 reopened.
 - QF-058 (Score 60, High): handleCompletion `catch {}` on insertSlice advances cursor on OOM. Same class as resolved QF-053. 1-line fix.
@@ -591,6 +630,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | processInput lines | 53 (after QF-002) | 77 | +24 (regression) |
 
 **Key observations:**
+
 - 15 new findings from Phase 21 validated scan (QF-067 through QF-083; QF-068 rejected as duplicate of PF-038).
 - 1 High-severity finding (QF-067): search.zig has 73 lines and 0 test blocks. Same pattern as resolved QF-046/QF-047 (extracted modules shipped without tests). GitLab issue #119 created.
 - 14 Low-severity findings: 10 readability (long functions, deep nesting, catch {} on unreachable paths), 1 correctness (multi-byte key handling in search), 1 consistency (Vi 'O' catch {} pattern), 2 monitoring items.
@@ -620,6 +660,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | processAction lines | 166 | 169 | +3 (stable, under 180) |
 
 **Key observations:**
+
 - 4 new findings from Phase 23 quality-reviewer pass (QF-084 through QF-087).
 - All 4 findings are Low severity. No new Critical, High, or Medium findings.
 - QF-084 (Score 12, Documentation): 6 public functions missing `///` doc comments across completion.zig, config.zig, core.zig. Quick fix.
@@ -649,6 +690,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | New issues created | -- | 0 (Low findings, no GitLab issues) | 0 |
 
 **Key observations:**
+
 - All 4 Phase 23 intake findings resolved in this closure cycle.
 - QF-084 (Score 12, Documentation): `///` doc comments added to 6 public functions in completion.zig, config.zig, core.zig.
 - QF-085 (Score 20, Testing): 6 new tests added to config.zig for loadFromFile, saveToFile, round-trip, getDefaultConfigPath. config.zig now has 9 test blocks.
@@ -676,6 +718,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | 13 prior open items | all open | all confirmed open (unchanged) | 0 |
 
 **Key observations:**
+
 - 3 new findings from Audit Cycle 2, Phase 4 (quality-reviewer + quality-scanner).
 - QF-090 (Score 20, Medium, confidence::confirmed): `resolveEnvOverridePath` in `text_utils.zig:170-171` has no bounds check before `std.ascii.upperString` on a 256-byte buffer. If `app_name > 256` bytes, Debug builds panic, ReleaseFast is UB. GitLab issue #121 created. Quick fix: add length guard.
 - QF-088 (Score 8, Low, confidence::confirmed): Dead code in core.zig -- `last_was_kill = true` at L635 (`.delete_word`) and L652 (`.delete_word_backward`) is immediately cleared by the post-switch guard at L763. Only `.delete_to_eol` and `.delete_to_bol` survive the guard. No runtime impact, but misleading. Tracked in docs only per Low-severity policy.
@@ -702,6 +745,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 | Test count | 300 | 315 | +15 new tests |
 
 **Key observations:**
+
 - 5 findings resolved and 1 marked Won't Do in this gap closure cycle.
 - QF-067 (High, Score 60): search.zig now has 16 test blocks covering replaceNewlinesForDisplay and ESC sequence handling. GitLab issue #119 closed.
 - QF-090 (Medium, Score 20): Bounds checks added at text_utils.zig:172,176 for both env_name_buf (256) and full_env_name (512). 2 new tests. GitLab issue #121 closed.
@@ -711,9 +755,40 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 - QF-089 (Low, Score 8): Marked Won't Do -- intentional omission for simplified Vi mode; Vi normal mode provides `/` for search.
 - All 315/315 tests pass. No regressions.
 
+### Phase 25 -> Audit Cycle 3 (Re-Review, branch `audit-cycle-3-gap-closure`)
+
+| Metric | Phase 25 (2026-03-25 gap closure) | Audit Cycle 3 (2026-06-12 re-review) | Delta |
+|--------|-----------------------------------|--------------------------------------|-------|
+| Total findings (distinct QF rows) | ~88 | 95 | +7 (QF-091..098; 097 split a-d) |
+| Open findings | 10 (1 partial, 1 accepted, 5 won't-do) | 15 open + 1 partial + 1 accepted | +5 new open |
+| Resolved findings | 71 | 73 | +2 net in tables (+6 new resolved this cycle) |
+| Won't Do | 5 | 5 | 0 |
+| Partial | 1 | 1 | 0 |
+| Accepted | 1 | 1 | 0 |
+| Critical (open) | 0 | 0 | 0 |
+| High (open) | 0 (1 partial) | 0 (1 partial) | 0 |
+| Medium (open) | 0 (1 accepted) | 0 (1 accepted) | 0 |
+| Low (open) | 10 | 15 | +5 |
+| Highest open score | 85 (QF-026, partial) | 85 (QF-026, partial) | 0 |
+| GitLab issues closed this cycle | 2 (#119, #121) | 1 (#136; #127/#140 closed by gap orchestrator) | -- |
+
+**Key observations:**
+
+- 6 findings resolved across two commits (ec9a1dc, cf50500) and 8 new Low/backlog items tracked.
+- QF-091 (Low, Cleanup): 15 zero-caller migration stubs deleted from compat.zig (-172 lines), commit ec9a1dc. GitLab issue #136 closed.
+- QF-092 (High, APIContract, Q1/Q5): otel contract blast radius -- README/repl docs/tests/CI all claimed working telemetry that was a no-op. Seam restored, test runs enabled, CI `test-with-otel` job added, docs corrected; commit cf50500. Relates to #127/#140.
+- QF-093 (Medium, Consistency, Q2): version drift (repl.version 0.1.0 vs manifest 0.1.7) eliminated by single-sourcing from build.zig.zon via build_options + a drift test; commit cf50500.
+- QF-094 (Medium, Correctness, Q3): compat cwdCreateFile now forwards caller flags (.read/.truncate/.exclusive/.permissions); unused cwdOpenFile/cwdOpenDir deleted; commit ec9a1dc.
+- QF-095 (Medium, ErrorHandling, Q7): Config.saveToFile now atomic (temp-file + rename) -- a crash mid-write no longer destroys config; commit ec9a1dc.
+- QF-096 (Low, Documentation, Q8): TEMPORARY-migration-shim banner added to compat.zig; commit ec9a1dc.
+- New tracked Low/backlog: QF-097a..d (line-length items, already filed as #137/#138/#139/#141 -- so a future re-review sees them as ALREADY TRACKED, not new), and QF-098/Q4 (observability error_kind doc-vs-caller cardinality mismatch on the dormant `-Dwith_otel` path, relates to #140). Q6 (history append cross-process race / non-O_APPEND positional write) recorded as a single-process documented limitation, folded into QF-079 monitoring.
+- Pre-existing readability regressions QF-070..079/083 remain tracked-open; current line counts re-verified this cycle (processAction 171, renderPrompt 87, processInput 52, platform.zig 956, generateFilePathCandidates 88, isBalanced 115, handlePendingOperator 107, handleInsertMode 69, history.append ~83). These are NOT new.
+- No new Critical findings; the resolved otel/version/compat items removed real correctness and reliability risk. All 315/315 tests pass.
+
 ---
 
 **Key observations (Phase 5 -> Phase 6):**
+
 - 8 new findings from Phase 3 quality-reviewer, all Medium or Low severity.
 - No new Critical or High findings -- the codebase's major issues remain stable.
 - 3 Medium-severity findings received GitLab issues: render.zig tests (#80), input.zig tests (#81), CI cache (#84).
@@ -728,6 +803,7 @@ Phase 25 (Gap Closure) resolved 5 findings and marked 1 won't-do: QF-067 (search
 ## Confidence Notes
 
 All findings tagged `confidence::confirmed` were verified by direct code inspection during this re-audit. Evidence includes:
+
 - Line counts verified via `wc -l` on current source files.
 - Function boundaries verified by reading source.
 - Dead code confirmed via grep for callers across the entire `src/` directory.
@@ -775,6 +851,7 @@ All findings tagged `confidence::confirmed` were verified by direct code inspect
 - QF-070 processAction size updated: L597-765 = 169 lines (was 166 at Phase 21).
 
 Phase 23 new findings:
+
 - QF-084 missing doc comments verified (`confidence::confirmed`): completion.zig:32 (init), completion.zig:39 (deinit), completion.zig:116 (generate), config.zig:59 (Keymap.fromString), config.zig:77 (Format.fromString), core.zig:248 (ReplState.deinit) -- all public functions lacking `///` doc comments.
 - QF-085 config.zig test gap verified (`confidence::confirmed`): `grep -c "^test " src/config.zig` = 3; 240 non-test lines; `loadFromFile`, `saveToFile`, `getDefaultConfigPath` have zero test coverage.
 - QF-086 path helper duplication verified (`confidence::confirmed`): history.zig:276-326 and config.zig:195-239 share env var check + isPathSafe + platform dispatch pattern (~50 lines structural duplication).
@@ -783,6 +860,7 @@ Phase 23 new findings:
 One `confidence::suspected` finding: QF-087. Confirmation requires a test exercising search exit followed by Up/Down history navigation to verify stale history_index behavior.
 
 Phase 24 (Audit Cycle 2) new findings:
+
 - QF-088 dead code verified (`confidence::confirmed`): core.zig:635 `.delete_word` sets `state.last_was_kill = true`; core.zig:652 `.delete_word_backward` sets `state.last_was_kill = true`; core.zig:763 post-switch guard `if (action != .delete_to_eol and action != .delete_to_bol) { state.last_was_kill = false; }` immediately clears both. Only `.delete_to_eol` (L658) and `.delete_to_bol` (L667) survive the guard.
 - QF-089 Vi insert missing Ctrl+R (`confidence::suspected`): keymap_vi.zig:348-369 Vi insert mode Ctrl-key switch has no `'r'` case. keymap_emacs.zig maps Ctrl+R to `.search`. Vi normal mode maps `/` to search. Suspected intentional omission -- would need confirmation from maintainer whether Vi insert mode should support reverse search or if this is by design for simplified Vi emulation.
 - QF-090 bounds check verified (`confidence::confirmed`): text_utils.zig:170 `var env_name_buf: [256]u8 = undefined;` L171 `std.ascii.upperString(&env_name_buf, app_name)` -- `upperString` writes `app_name.len` bytes to output buffer with no internal bounds check in Zig stdlib (it uses `@memcpy` which panics on Debug if dest shorter than src). `bufPrint` at L173 has `catch return null` but `upperString` at L171 does not.

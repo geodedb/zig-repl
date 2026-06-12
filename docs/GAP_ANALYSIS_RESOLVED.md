@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved Gaps
 
 **Project:** Zig REPL Library (`/home/benji/src/gl/devnw/zig/repl`)
-**Last updated:** 2026-03-25 (Phase 20 / Gap Closure -- no GAP-XXXX changes; 64 of 65 gaps remain resolved; specialized gap analyses updated separately)
+**Last updated:** 2026-06-12 (Audit Cycle 3 / Gap Closure -- 7 gaps resolved this cycle (GAP-0066..GAP-0072); 71 of 73 gaps resolved; GAP-0052 and GAP-0073 remain open)
 
 This file tracks gaps that were previously open in `GAP_ANALYSIS.md` and have been resolved.
 Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned referencing the old one.
@@ -76,6 +76,13 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 | GAP-0063 | Duplicate CONTRIBUTING.md | 2026-03-25 | [#116](https://gitlab.com/devnw/zig/repl/-/issues/116) (closed) |
 | GAP-0064 | .gitignore cleanup | 2026-03-25 | [#117](https://gitlab.com/devnw/zig/repl/-/issues/117) (closed) |
 | GAP-0065 | README format check command | 2026-03-25 | [#118](https://gitlab.com/devnw/zig/repl/-/issues/118) (closed) |
+| GAP-0066 | Config files written world-readable (CWE-732) | 2026-06-12 | [#122](https://gitlab.com/devnw/zig/repl/-/issues/122) |
+| GAP-0067 | History permission enforcement on pre-existing files removed | 2026-06-12 | [#123](https://gitlab.com/devnw/zig/repl/-/issues/123) |
+| GAP-0068 | compat.chmod is a silent no-op | 2026-06-12 | [#126](https://gitlab.com/devnw/zig/repl/-/issues/126) |
+| GAP-0069 | sync_diamond_deps --cascade --apply blast radius | 2026-06-12 | [#124](https://gitlab.com/devnw/zig/repl/-/issues/124) |
+| GAP-0070 | Observability seam hardcoded enabled=false | 2026-06-12 | [#127](https://gitlab.com/devnw/zig/repl/-/issues/127), [#140](https://gitlab.com/devnw/zig/repl/-/issues/140) |
+| GAP-0071 | Docker base image not digest-pinned | 2026-06-12 | [#133](https://gitlab.com/devnw/zig/repl/-/issues/133) |
+| GAP-0072 | processInput zero direct tests | 2026-06-12 | [#52](https://gitlab.com/devnw/zig/repl/-/issues/52) |
 
 ---
 
@@ -108,7 +115,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Issue:** [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) (closed)
 - **Category:** Infrastructure
 - **Resolution:** Pipeline 2406048174 passed all 10 jobs on GitLab CI runners at commit `168625f`. Jobs verified: build, test (Debug, ReleaseSafe, ReleaseFast, ReleaseSmall), zig-format, secret_detection, security-gitleaks, sbom-generate, sbom-scan.
-- **Evidence:** Pipeline https://gitlab.com/devnw/zig/repl/-/pipelines/2406048174 -- all 10 jobs green
+- **Evidence:** Pipeline <https://gitlab.com/devnw/zig/repl/-/pipelines/2406048174> -- all 10 jobs green
 - **Resolved date:** 2026-03-24
 
 ### GAP-0005: Core REPL Loop Untested [RESOLVED]
@@ -439,7 +446,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Issue:** [#102](https://gitlab.com/devnw/zig/repl/-/issues/102) (closed)
 - **Category:** Bug
 - **Severity:** High
-- **Resolution:** Introduced `SyntheticKey` constants in `src/input.zig` with `delete=0x04` to distinguish the Delete key (ESC[3~) from Ctrl+_ (undo). The Emacs keymap now maps `SyntheticKey.delete` to `delete_char_forward` while Ctrl+_ continues to map to `.undo`. Integration tests verify both behaviors.
+- **Resolution:** Introduced `SyntheticKey` constants in `src/input.zig` with `delete=0x04` to distinguish the Delete key (ESC[3~) from Ctrl+_(undo). The Emacs keymap now maps `SyntheticKey.delete` to `delete_char_forward` while Ctrl+_ continues to map to `.undo`. Integration tests verify both behaviors.
 - **Evidence:** `src/input.zig` -- `SyntheticKey.delete = 0x04`; `src/keymap_emacs.zig` -- maps delete to `delete_char_forward`; `tests/integration.zig` -- Delete key and Ctrl+_ tests. 257/257 tests pass.
 - **Resolved date:** 2026-03-24
 
@@ -564,7 +571,7 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Issue:** [#115](https://gitlab.com/devnw/zig/repl/-/issues/115) (closed)
 - **Category:** Docs (Legal)
 - **Severity:** Low
-- **Resolution:** Updated copyright year from "2024-2025" to "2024-2026" in all src/*.zig (15 files), examples/*.zig (8 files), tests/integration.zig, build.zig, LICENSE, .gitleaks.toml, and CODEOWNERS. Entity name discrepancy (CodePros vs DevNW LLC) left as maintainer decision.
+- **Resolution:** Updated copyright year from "2024-2025" to "2024-2026" in all src/_.zig (15 files), examples/_.zig (8 files), tests/integration.zig, build.zig, LICENSE, .gitleaks.toml, and CODEOWNERS. Entity name discrepancy (CodePros vs DevNW LLC) left as maintainer decision.
 - **Evidence:** `grep -r "2024-2025"` returns only GAP_ANALYSIS.md references to the old state
 - **Resolved date:** 2026-03-25
 
@@ -604,8 +611,71 @@ Gap-IDs are never reused. If a resolved gap regresses, a new Gap-ID is assigned 
 - **Evidence:** `README.md` and `docs/CONTRIBUTING.md` both show the complete format check command
 - **Resolved date:** 2026-03-25
 
+### GAP-0066: Config Files Written World-Readable -- No-op chmod + Missing .permissions (CWE-732) [RESOLVED]
+
+- **Issue:** [#122](https://gitlab.com/devnw/zig/repl/-/issues/122)
+- **Category:** Security
+- **Severity:** High
+- **Resolution:** Config persistence now writes with restrictive permissions. `src/config.zig` sets `.permissions = 0o600` on create and performs an atomic save (write to temp file, then rename) so the config file is never world-readable at any point. Added a test asserting the saved config file mode is `0o600` (SF-001/SF-023 regression closed).
+- **Evidence:** commit ec9a1dc -- `src/config.zig` save path uses `.permissions = 0o600` + atomic temp-write/rename; permission-assertion test added
+- **Resolved date:** 2026-06-12
+
+### GAP-0067: History Permission Enforcement on Pre-existing Files Removed [RESOLVED]
+
+- **Issue:** [#123](https://gitlab.com/devnw/zig/repl/-/issues/123)
+- **Category:** Security
+- **Severity:** Medium
+- **Resolution:** History save re-tightens permissions on pre-existing files via `compat.chmod`, restoring enforcement for files that already existed on disk (not just newly created ones). Added tests covering the pre-existing-file path (SF-022/SF-024 regression closed).
+- **Evidence:** commit ec9a1dc -- history save path calls `compat.chmod` to re-tighten pre-existing file permissions; tests added
+- **Resolved date:** 2026-06-12
+
+### GAP-0068: compat.chmod Is a Silent No-op [RESOLVED]
+
+- **Issue:** [#126](https://gitlab.com/devnw/zig/repl/-/issues/126)
+- **Category:** Security
+- **Severity:** Low
+- **Resolution:** Replaced the no-op `compat.chmod` shim with a real `setPermissions` implementation so permission tightening actually takes effect for all callers. Added a test verifying the resulting file mode.
+- **Evidence:** commit ec9a1dc -- `compat.chmod` now performs a real `setPermissions` call; mode-verification test added
+- **Resolved date:** 2026-06-12
+
+### GAP-0069: sync_diamond_deps --cascade --apply Blast Radius [RESOLVED]
+
+- **Issue:** [#124](https://gitlab.com/devnw/zig/repl/-/issues/124)
+- **Category:** Security
+- **Severity:** Medium
+- **Resolution:** Hardened `sync_diamond_deps.py --cascade --apply` against unbounded blast radius: added an interactive confirmation gate, an allowlist of permitted target remotes, target verification before any push, and guarded deletes (no unconditional `rm -rf` from untrusted input).
+- **Evidence:** commit 5eae04d -- `scripts/sync_diamond_deps.py` adds confirmation/allowlist/target-verify/guarded-delete controls
+- **Resolved date:** 2026-06-12
+
+### GAP-0070: Observability Seam Hardcoded enabled=false [RESOLVED]
+
+- **Issue:** [#127](https://gitlab.com/devnw/zig/repl/-/issues/127), [#140](https://gitlab.com/devnw/zig/repl/-/issues/140)
+- **Category:** Code Quality
+- **Severity:** Low
+- **Resolution:** Restored the observability seam so `enabled` is driven by `build_options.with_otel` instead of a hardcoded `false`. The `-Dwith_otel` build flag now has effect, and a CI `test-with-otel` job exercises the enabled path so it cannot silently rot.
+- **Evidence:** commit cf50500 -- `enabled = build_options.with_otel`; CI `test-with-otel` job added
+- **Resolved date:** 2026-06-12
+
+### GAP-0071: Docker Base Image Not Digest-Pinned [RESOLVED]
+
+- **Issue:** [#133](https://gitlab.com/devnw/zig/repl/-/issues/133)
+- **Category:** CI-CD
+- **Severity:** Low
+- **Resolution:** Pinned the CI Docker base image `debian:bookworm-slim` to an immutable digest (`sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716`) via a `$DEBIAN_IMAGE` variable, removing the floating tag for reproducible builds.
+- **Evidence:** commit cf50500 -- CI config pins `debian:bookworm-slim@sha256:96e378d7...4716` through `$DEBIAN_IMAGE`
+- **Resolved date:** 2026-06-12
+
+### GAP-0072: processInput Zero Direct Tests [RESOLVED]
+
+- **Issue:** [#52](https://gitlab.com/devnw/zig/repl/-/issues/52)
+- **Category:** Test
+- **Severity:** Medium
+- **Resolution:** Extracted a testable `processReadBuffer` from `processInput` and added direct tests driven by a mock stdin, giving the input loop real coverage. 18 new core tests added covering the read/parse path.
+- **Evidence:** commit d039c05 -- `processReadBuffer` extracted from `processInput`; 18 mock-stdin core tests added
+- **Resolved date:** 2026-06-12
+
 ---
 
 ## Won't Do / Deferred
 
-_No Won't-Do items in the main gap tracker. 64 of 65 gaps have been resolved. GAP-0052 remains open (blocked on #31)._
+_No Won't-Do items in the main gap tracker. 71 of 73 gaps have been resolved. Two gaps remain open: GAP-0052 (blocked on #31 -- release signing CI enforcement) and GAP-0073 (deferred -- API docs not generated/published, tracked on #20)._

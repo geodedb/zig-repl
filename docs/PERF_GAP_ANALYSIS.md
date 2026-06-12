@@ -1,8 +1,8 @@
 # Performance Gap Analysis -- devnw/zig/repl
 
 **Project:** gitlab.com/devnw/zig/repl
-**Last updated:** 2026-03-25 (Phase 15 -- Gap Closure: 8 resolved, 6 won't-do; PF-009, PF-011, PF-021, PF-022, PF-026, PF-032, PF-036, PF-040 resolved)
-**Audit phase:** Phase 15 (Gap Closure) -- 8 items resolved (single-pass render, arena allocator, SIGWINCH+cached width, O(n) dedup, search resume, writev, CI summary); 6 won't-do (sub-µs optimizations not worth complexity)
+**Last updated:** 2026-06-12 (Audit Cycle 3 -- Re-review: PF-043 resolved (lazy undo snapshot, commit d039c05); 10 new findings PF-043--PF-052 recorded, all LOW/INFO/P3 backlog)
+**Audit phase:** Audit Cycle 3 (Re-review on branch `audit-cycle-3-gap-closure`) -- 1 resolved (lazy per-keystroke undo snapshot), 9 new tracked-open/deferred/won't-do items (all sub-µs / cold-path); GitLab issues #128--#132, #134, #135 reconciled (no duplicates created)
 **Methodology:** Static code analysis with PerfScore framework
 
 ---
@@ -16,19 +16,23 @@
 | P0       | 0    | 1        | 0        | 1     | SLO breach / outage risk -- immediate action |
 | P1       | 0    | 3        | 0        | 3     | Material user-facing impact -- within sprint |
 | P2       | 0    | 6        | 0        | 6     | Moderate impact / cost -- next quarter |
-| P3       | 1    | 12       | 0        | 13    | Minor optimization -- backlog |
-| Info     | 6    | 5        | 6        | 17    | Hardening / best practice -- as capacity allows |
-| **Total**| **7** | **27** | **6** | **40** | |
+| P3       | 5    | 13       | 0        | 18    | Minor optimization -- backlog |
+| Info     | 10   | 5        | 7        | 22    | Hardening / best practice -- as capacity allows |
+| **Total**| **15** | **28** | **7** | **50** | |
 
-**Progress since Phase 15 (Gap Closure):** 8 items resolved: PF-009 (single-pass calculateRenderInfo in render.zig, used by core.zig), PF-011 (arena allocator for completion candidates), PF-021+PF-040 (SIGWINCH handler + cached terminal width in platform.zig), PF-022 (O(n) compacting dedup pass in history.zig), PF-026 (search resume from history_index in search.zig), PF-032 (writev for history append), PF-036 (CI --summary all). 6 items marked Won't Do: PF-025 (in-memory fixedBufferStream writes, sub-µs), PF-031 (would add real error paths for sub-µs gain), PF-033 (init-only shouldUseColor, not per-keystroke), PF-034 (stdlib readToEndAlloc already optimizes), PF-038 (snapshot must precede handleKey), PF-039 (correct LIFO semantics, L1-cache data). 27 of 40 total findings resolved, 6 won't do, 7 open (1 P3, 6 Info). Overall performance posture Strong/Production-Ready.
+**Progress this cycle (Audit Cycle 3 -- Re-review, 2026-06-12):** 1 item resolved -- **PF-043** (lazy per-keystroke undo snapshot, commit d039c05): the pre-edit buffer dupe is now taken lazily via a `keyMayMutate` predictor, so pure cursor moves / history-nav perform ZERO buffer dupes and no-op edits (backspace-at-BOL, delete-at-EOL) skip dead undo entries; verified by a counting-allocator test. This effectively closes the optimization that PF-038 previously declined (PF-038 stays Won't Do as originally scoped; PF-043 records the realized fix). 9 new findings recorded as tracked backlog -- 4 P3 open (PF-044 defaultIo fat-struct, PF-046 file.length() extra syscall, PF-047 history-append newline alloc, PF-048 UndoStack O(n) eviction), 4 Info open/deferred (PF-045 single-threaded Mutex spinlock, PF-049 3x stderr writeAll, PF-050 TerminalWriter 6+ syscalls, PF-051 searchBackward per-keystroke re-scan), 1 Info Won't Do (PF-052 UndoStack uncapped retained bytes). **All new items are sub-µs / cold-path; none are P0/P1.** GitLab issues #128--#132, #134, #135 reconciled (PF-IDs cross-referenced in comments; no duplicate issues created). Overall performance posture remains Strong/Production-Ready: keystroke-to-render latency ~5-20µs, 500-2000x below human perception.
+
+**Cumulative (since Phase 15):** Phase 15 resolved 8 (single-pass render, arena allocator, SIGWINCH+cached width, O(n) dedup, search resume, writev, CI summary) and marked 6 Won't Do (sub-µs optimizations not worth complexity). 28 of 50 total findings resolved, 7 won't do, 15 open (5 P3, 10 Info).
 
 ### Top Open Risks by Expected Impact
 
-1. **PF-010 (P3, Score 25):** orderedRemove(0) on history append overflow. Use ring buffer or swap-remove with sort. Only remaining P3.
-2. **PF-014 (Info):** Full history file read into memory. Bounded by 64MB check; adequate for interactive use.
-3. **PF-023 (Info):** handleSearch stdout writes. 1 syscall/keystroke; not a bottleneck.
-4. **PF-029 (Info):** appendToMultiLine no pre-allocate. Minor; no measurable impact.
-5. **PF-030 (Info):** search_buffer starts at capacity 0. Few reallocs for short queries.
+1. **PF-048 (P3, Score 25):** UndoStack orderedRemove(0) O(n) memmove on eviction; fires every ~100 destructive keystrokes at steady state. Ring buffer or swap eviction. [#132](https://gitlab.com/devnw/zig/repl/-/issues/132)
+2. **PF-010 (P3, Score 25):** orderedRemove(0) on history append overflow. Use ring buffer or swap-remove with sort. [#69](https://gitlab.com/devnw/zig/repl/-/issues/69)
+3. **PF-046 (P3, Score 20):** file.length() extra syscall before every history append on the persistent handle. Track length in-process. [#130](https://gitlab.com/devnw/zig/repl/-/issues/130)
+4. **PF-047 (P3, Score 16):** heap alloc+free per history append solely to concatenate the trailing newline. Use writev iovec. [#131](https://gitlab.com/devnw/zig/repl/-/issues/131)
+5. **PF-044 (P3, Score 16, suspected):** defaultIo() constructs a fat Io struct (~30 fn-ptr fields) per call, ~28 sites incl. render path; optimizer may fold. Confirm with disassembly. [#128](https://gitlab.com/devnw/zig/repl/-/issues/128)
+
+All five are minor-optimization backlog (P3). None affect the interactive keystroke-to-render hot path materially; the per-keystroke undo allocation that did sit on the hot path was resolved this cycle (PF-043).
 
 ---
 
@@ -42,7 +46,12 @@
 | ~~2~~ | PF-017 | P2 | 40 | Paste buffer 4096 silent truncation | core.zig | `if (paste_collect_len < paste_collect_buf.len)` silently drops chars | -- | Flush-and-continue: when paste buffer is full, flush to edit buffer and reset | Resolved |
 | ~~3~~ | PF-019 | P3 | 30 | Render buffer 8192 silent truncation | core.zig | `var render_buf: [8192]u8 = undefined` with `catch {}` overflow | -- | buffer_full flag stops writes on overflow; cursor positioning skipped to avoid broken ANSI | Resolved |
 | ~~4~~ | PF-021 | P3 | 25 | getTerminalWidth() ioctl syscall on every renderPrompt | platform.zig | `platform.getTerminalWidth()` calls `ioctl(STDOUT_FILENO, TIOCGWINSZ)` per render; 1 syscall per keystroke | -- | Added SIGWINCH handler (PF-040) + cached terminal width; `terminal_resized` flag invalidates cache on resize; getTerminalWidth() returns cached value when valid | Resolved |
-| 5 | PF-010 | P3 | 25 | orderedRemove(0) on history append overflow | history.zig | `orderedRemove(0)` when entries exceed max; O(n) per append at capacity | [#69](https://gitlab.com/devnw/zig/repl/-/issues/69) | Use ring buffer or swap-remove with sort | Deferred |
+| 5 | PF-048 | P3 | 24 | UndoStack orderedRemove(0) O(n) memmove on eviction | undo.zig | `orderedRemove(0)` when the undo stack is full (cap 100); O(n) memmove shifting up to 99 entries, fires every ~100 destructive keystrokes at steady state. Impact 3 x Likelihood 2 x 4 = 24 | [#132](https://gitlab.com/devnw/zig/repl/-/issues/132) | Ring buffer (head/tail indices) or swap-out eviction to avoid the O(n) shift | Open |
+| 6 | PF-010 | P3 | 25 | orderedRemove(0) on history append overflow | history.zig | `orderedRemove(0)` when entries exceed max; O(n) per append at capacity | [#69](https://gitlab.com/devnw/zig/repl/-/issues/69) | Use ring buffer or swap-remove with sort | Deferred |
+| 7 | PF-046 | P3 | 20 | file.length() extra syscall before every history append | history.zig | `file.length()` called before every `writePositionalAll` on the persistent append handle; 1 extra syscall per history append (per Enter, not per keystroke). Impact 3 x Likelihood ~2 (once per submitted line) x 4 ... class 20 | [#130](https://gitlab.com/devnw/zig/repl/-/issues/130) | Track the write offset in-process; avoid the per-append length syscall | Open |
+| 8 | PF-047 | P3 | 16 | Heap alloc+free per history append for newline concat | history.zig | `allocator.alloc` + `defer free` per `append()` solely to concatenate the trailing `\n`; 1 alloc/free pair per submitted line. Impact 2 x Likelihood 2 x 4 = 16 | [#131](https://gitlab.com/devnw/zig/repl/-/issues/131) | Use `writev`/iovec `[line, "\n"]` (mirrors PF-032) -- zero extra allocation | Open |
+| 9 | PF-044 | P3 | 16 | defaultIo() constructs fat Io struct (~30 fn-ptr fields) per call | core.zig (and ~28 sites) | `defaultIo()` builds the full `std.Io` vtable struct on every call; ~28 production call sites including the per-keystroke render path. Suspected -- the optimizer may fold the constant construction. Impact 4 x Likelihood ... discounted by suspected-fold: Impact 2 x Likelihood 2 x 4 = 16 | [#128](https://gitlab.com/devnw/zig/repl/-/issues/128) | Hoist a single cached `Io` instance; OR confirm via disassembly the construction is folded and close as no-op | Open |
+| 10 | PF-051 | Info | -- | searchBackward re-scans history per search keystroke | search.zig:83, history.zig:264 | `searchBackward` re-scans history entries on each search keystroke; O(N·patternlen) worst case. Note PF-026 already added resume-from-history_index for the incremental match cursor; this finding is the residual full-pattern re-compare cost within a single keystroke's scan. Cold path (only in reverse-search mode) | -- | Memoize last match span; or short-circuit when the query is an extension of the prior query | Deferred |
 | ~~6~~ | PF-011 | P3 | 24 | Per-candidate alloc/free churn in completion | completion.zig | `allocator.dupe()` per candidate in addCandidate; 1 alloc per candidate, up to 256 alloc/free at ~25-50us total; runs once per Tab press | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Added `arena: std.heap.ArenaAllocator` to CompletionContext; `addCandidate` uses arena allocator; `reset()` uses `arena.reset(.retain_capacity)` — O(1) instead of N frees | Resolved |
 | ~~7~~ | PF-022 | P3 | 20 | Global dedup orderedRemove(i) in while loop O(k*n) | history.zig | `orderedRemove(i)` inside `while` loop when `deduplicate_global` is true; O(k*n) where k=duplicates, n=entries | -- | Replaced with O(n) single-pass compacting: forward scan with write_idx, free duplicates in-place, shrinkRetainingCapacity at end | Resolved |
 | ~~8~~ | PF-009 | P3 | 20 | Redundant buffer scan (calculateVisualLines + calculateCursorPosition) | render.zig | Both functions iterate entire buffer independently; 2x full buffer scan per render | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Added `calculateRenderInfo()` single-pass function; core.zig renderPrompt now calls it once instead of two separate functions | Resolved |
@@ -62,15 +71,20 @@
 | ~~22~~ | PF-034 | Info | -- | Config.loadFromFile no pre-size-check for readToEndAlloc | config.zig | `file.readToEndAlloc(allocator, 1024 * 1024)` reads without checking file size first | -- | Won't Do -- stdlib `readToEndAlloc` already handles internal buffering and allocation; pre-checking adds a syscall for negligible memory savings on small config files | Won't Do |
 | ~~23~~ | PF-036 | Info | -- | Build job missing --summary all flag | .gitlab-ci.yml | `zig build` without `--summary all`; no build summary in CI logs | -- | Added `--summary all` to build command at .gitlab-ci.yml:93 | Resolved |
 | ~~24~~ | PF-038 | Info | -- | Undo pre-snapshot alloc+free on non-destructive keypresses | core.zig | `allocator.dupe()` runs on every keypress; freed immediately for non-destructive actions. Cost ~100-300ns per wasted cycle | -- | Won't Do -- snapshot must precede handleKey which modifies buffer directly; conditional dupe would require two keymap dispatches or deferred snapshot for sub-µs gain | Won't Do |
-| ~~25~~ | PF-039 | Info | -- | UndoStack orderedRemove(0) at capacity | undo.zig | `orderedRemove(0)` shifts up to 99 entries (~2.4KB) when stack is full; ~100-200ns. L1-cache-resident | -- | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data is 50-100x cheaper than any syscall | Won't Do |
+| ~~25~~ | PF-039 | Info | -- | UndoStack orderedRemove(0) at capacity | undo.zig | `orderedRemove(0)` shifts up to 99 entries (~2.4KB) when stack is full; ~100-200ns. L1-cache-resident. **Re-filed Cycle 3 as PF-048 (P3, [#132](https://gitlab.com/devnw/zig/repl/-/issues/132))** with a confirmed every-~100-keystroke steady-state cadence; PF-039 stays Won't Do at Info, PF-048 tracks the structural fix at P3 | -- | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data is 50-100x cheaper than any syscall. See PF-048 for the tracked structural fix | Won't Do |
 | ~~26~~ | PF-040 | Info | -- | No SIGWINCH handler (enabler for PF-021) | platform.zig | Signal infrastructure existed for SIGTERM/SIGHUP but SIGWINCH was not registered | -- | Registered SIGWINCH handler in installTerminalSignalHandlers; sets `terminal_resized` flag; removed in removeTerminalSignalHandlers | Resolved |
 | 27 | PF-042 | Info | -- | generateFilePathCandidates sorts <=256 candidates | completion.zig | `std.mem.sort` on up to 256 candidates; O(n log n) where n<=256; ~1-5µs; runs once per Tab press | -- | No action warranted. Sort provides consistent user-facing ordering | Deferred |
-| ~~28~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
+| 28 | PF-045 | Info | -- | compat.Mutex spinlock in single-threaded REPL | compat.zig | `compat.Mutex` lock/unlock performs atomic CAS + memory fence; the REPL is single-threaded so this is zero-correctness-benefit work on every locked section | [#129](https://gitlab.com/devnw/zig/repl/-/issues/129) | Provide a no-op Mutex shim for the single-threaded build, or remove the lock where provably single-threaded | Open |
+| 29 | PF-049 | Info | -- | 3 sequential writeAll syscalls per stderr error/warning message | core.zig | error/warning emit path issues 3 sequential `compat.writeAll` syscalls per message; cold path (error reporting), not per-keystroke | [#134](https://gitlab.com/devnw/zig/repl/-/issues/134) | Batch the message into one stack-buffered `writeAll` | Open |
+| 30 | PF-050 | Info | -- | TerminalWriter.writeError/Warning/Success 6+ syscalls per colored message | platform.zig | colored status messages issue 6+ `compat.writeAll` syscalls (color-on + text + reset, per segment); cold path (status/error output), not per-keystroke | [#135](https://gitlab.com/devnw/zig/repl/-/issues/135) | Batch color+text+reset into a single stack-buffered `writeAll` per message | Open |
+| ~~31~~ | PF-052 | Info | -- | UndoStack retained bytes uncapped (100 × line_len) | undo.zig | The undo stack caps entry count (100) but not retained bytes; worst case ~100 × line_len held. For a pathological multi-MB single line this is 100x that line in memory | -- | Won't Do -- bounding bytes adds eviction-policy complexity; interactive line lengths make worst-case retained memory negligible, and the entry-count cap already bounds growth | Won't Do |
+| ~~32~~ | PF-024 | Info | -- | CI re-downloads Zig on every job (no caching) | .gitlab-ci.yml:36-73 | `curl -fsSL` downloads Zig tarball in every CI job; no `cache:` directive | -- | Global `cache:` block added with `key: zig-${ZIG_VERSION}` and `paths: [zig-${ZIG_VERSION}/]` | Resolved |
 
 ### Resolved Findings
 
 | PF-ID | Severity | PerfScore | Finding | Component | Resolution | Resolved In |
 |-------|----------|-----------|---------|-----------|------------|-------------|
+| PF-043 | P3 | 30 | Per-keystroke unconditional undo snapshot dupe | core.zig:378 | Undo snapshot made lazy: a conservative `keyMayMutate` predictor takes the pre-edit buffer dupe only for keys that can mutate the buffer. Pure cursor moves / history-nav now perform ZERO buffer dupes; no-op edits (backspace-at-BOL, delete-at-EOL) skip dead undo entries by comparing snapshot vs post-action buffer. Exhaustive guard test proves the predictor never under-predicts a mutating key; zero-dupe property verified by counting-allocator test. Realizes the optimization PF-038 had declined as too costly. | Audit Cycle 3 (commit d039c05) |
 | PF-004 | P2 | 48 | File open/close per history append (6 syscalls/append) | history.zig | Added persistent `append_handle: ?std.fs.File`; lazily opened on first append, reused for subsequent appends; closed in deinit() and reset in clear(). Syscalls reduced from 6 to 2 per append. 3 tests added. | Phase 14 (Gap Closure) |
 | PF-001 | P0 | 92 | Byte-by-byte stdout writes (~100 syscalls/render) | core.zig:340-343 | fixedBufferStream with 8192-byte render_buf, single writeAll per render | Phase 4 |
 | PF-002 | P1 | 78 | O(n*k) insert during bracketed paste | core.zig:454-478 | Batch paste into paste_collect_buf[4096], single insertSlice | Phase 4 |
@@ -105,7 +119,8 @@
 | PF-033 | Info | shouldUseColor() 2 getenv + 1 isatty per TerminalWriter init | Won't Do -- called once at TerminalWriter.init() (startup), not per-keystroke; caching adds complexity for zero runtime benefit |
 | PF-034 | Info | Config.loadFromFile no pre-size-check for readToEndAlloc | Won't Do -- stdlib `readToEndAlloc` already handles internal buffering; pre-checking adds a syscall for negligible memory savings on small configs |
 | PF-038 | Info | Undo pre-snapshot alloc+free on non-destructive keypresses | Won't Do -- snapshot must precede handleKey which modifies buffer directly; conditional dupe requires two keymap dispatches for sub-µs gain |
-| PF-039 | Info | UndoStack orderedRemove(0) at capacity | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data (~2.4KB) is 50-100x cheaper than any syscall |
+| PF-039 | Info | UndoStack orderedRemove(0) at capacity | Won't Do -- orderedRemove is correct for LIFO undo semantics (oldest entry evicted); L1-cache-resident data (~2.4KB) is 50-100x cheaper than any syscall. Structural fix tracked separately as PF-048 (P3, [#132](https://gitlab.com/devnw/zig/repl/-/issues/132)) |
+| PF-052 | Info | UndoStack retained bytes uncapped (100 × line_len) | Won't Do -- bounding retained bytes adds eviction-policy complexity; the entry-count cap (100) already bounds growth, and interactive line lengths make worst-case retained memory negligible |
 
 ---
 
@@ -150,6 +165,16 @@
 | PF-039 | Info | -- | undo.zig | UndoStack orderedRemove(0) at capacity | Won't Do |
 | PF-040 | Info | -- | platform.zig | SIGWINCH handler (enabler for PF-021) | Resolved |
 | PF-042 | Info | -- | completion.zig | generateFilePathCandidates sorts <=256 candidates (negligible) | Deferred |
+| PF-043 | P3 | 30 | core.zig | Per-keystroke unconditional undo snapshot dupe (now lazy via keyMayMutate) | Resolved |
+| PF-044 | P3 | 16 | core.zig | defaultIo() fat Io struct per call (~28 sites incl. render path; suspected fold) | Open |
+| PF-045 | Info | -- | compat.zig | compat.Mutex spinlock (atomic CAS + fence) in single-threaded REPL | Open |
+| PF-046 | P3 | 20 | history.zig | file.length() extra syscall before every history append | Open |
+| PF-047 | P3 | 16 | history.zig | Heap alloc+free per history append for newline concat | Open |
+| PF-048 | P3 | 24 | undo.zig | UndoStack orderedRemove(0) O(n) memmove on eviction (~every 100 keystrokes) | Open |
+| PF-049 | Info | -- | core.zig | 3 sequential writeAll syscalls per stderr error/warning message | Open |
+| PF-050 | Info | -- | platform.zig | TerminalWriter.writeError/Warning/Success 6+ syscalls per colored message | Open |
+| PF-051 | Info | -- | search.zig, history.zig | searchBackward re-scans history per search keystroke (O(N·patternlen)) | Deferred |
+| PF-052 | Info | -- | undo.zig | UndoStack retained bytes uncapped (100 × line_len) | Won't Do |
 
 ### Infrastructure (`area::infra`)
 
@@ -184,6 +209,15 @@
 | PF-039 | -- | orderedRemove correct for LIFO undo; L1-cache data | -- | Won't Do |
 | PF-040 | -- | Registered SIGWINCH handler alongside SIGTERM/SIGHUP | 1-2 hours | Resolved |
 | PF-036 | -- | Added `--summary all` to build command in .gitlab-ci.yml | 5 min | Resolved |
+| PF-043 | 30 | Lazy undo snapshot via `keyMayMutate` predictor; zero dupes on cursor moves / history nav; no-op edits skip dead entries | 1 day | Resolved |
+| PF-046 | 20 | Track write offset in-process; drop the per-append `file.length()` syscall | 1 hour | Open |
+| PF-047 | 16 | Replace newline-concat alloc with `writev` iovec `[line, "\n"]` (mirrors PF-032) | 30 min | Open |
+| PF-049 | -- | Batch 3 stderr writeAll calls into one stack-buffered write | 30 min | Open |
+| PF-050 | -- | Batch color+text+reset into one writeAll per colored message | 1 hour | Open |
+| PF-045 | -- | No-op Mutex shim for single-threaded build (or remove provably-single-threaded locks) | 1-2 hours | Open |
+| PF-044 | 16 | Cache a single `Io` instance, OR confirm via disassembly the construction is folded and close | 1-2 hours | Open |
+| PF-051 | -- | Memoize last search match span / short-circuit on query extension | 2-4 hours | Deferred |
+| PF-052 | -- | Cap UndoStack retained bytes -- declined (entry-count cap suffices) | -- | Won't Do |
 
 ### Medium Effort (1-5 days)
 
@@ -204,6 +238,7 @@
 |-------|-------|-----|--------|--------|
 | PF-011 | 24 | Arena allocator for completion lifecycle. ArenaAllocator field in CompletionContext; reset(.retain_capacity) in reset() | 2 hours | Resolved |
 | PF-010 | 25 | Ring buffer for history or swap-remove with sort | 3-5 days | Deferred |
+| PF-048 | 24 | Ring buffer (head/tail indices) or swap-out eviction for UndoStack to drop the O(n) memmove | 3-5 days | Open |
 | PF-013 | -- | Benchmark suite (render, paste, history, completion) | 3-5 days | Deferred |
 | PF-023 | -- | Buffer search mode output into stack buffer; single flush per keystroke. Corrected: 1 write/keystroke + 1 on search entry (not 2/keystroke) | 1 day | Deferred |
 
@@ -222,8 +257,17 @@
 | PF-011 | P3 | [#70](https://gitlab.com/devnw/zig/repl/-/issues/70) | Resolved |
 | PF-009 | P3 | [#68](https://gitlab.com/devnw/zig/repl/-/issues/68) | Resolved |
 | PF-012 | Info | [#1](https://gitlab.com/devnw/zig/repl/-/issues/1), [#71](https://gitlab.com/devnw/zig/repl/-/issues/71) | Resolved |
+| PF-013 | Info | [#77](https://gitlab.com/devnw/zig/repl/-/issues/77) | Deferred |
+| PF-014 | Info | [#78](https://gitlab.com/devnw/zig/repl/-/issues/78) | Deferred |
+| PF-044 | P3 | [#128](https://gitlab.com/devnw/zig/repl/-/issues/128) | Open |
+| PF-045 | Info | [#129](https://gitlab.com/devnw/zig/repl/-/issues/129) | Open |
+| PF-046 | P3 | [#130](https://gitlab.com/devnw/zig/repl/-/issues/130) | Open |
+| PF-047 | P3 | [#131](https://gitlab.com/devnw/zig/repl/-/issues/131) | Open |
+| PF-048 | P3 | [#132](https://gitlab.com/devnw/zig/repl/-/issues/132) | Open |
+| PF-049 | Info | [#134](https://gitlab.com/devnw/zig/repl/-/issues/134) | Open |
+| PF-050 | Info | [#135](https://gitlab.com/devnw/zig/repl/-/issues/135) | Open |
 
-*Note: PF-021 through PF-042 are all P3/Info severity (backlog). No GitLab issues created per policy -- issues are only tracked for P0-P2 findings.*
+*Note: most P3/Info backlog findings carry no GitLab issue (tracked in this doc only). Audit Cycle 3 reconciled the seven perf issues #128--#132, #134, #135 that were filed independently -- each now carries its PF-ID in an issue comment. PF-043 (resolved this cycle) was a deep-review finding fixed inline (commit d039c05) and has no standalone issue. PF-051 and PF-052 are doc-tracked only.*
 
 ---
 
@@ -231,6 +275,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-06-12 (Audit Cycle 3 -- Re-review) | Re-review on branch `audit-cycle-3-gap-closure`. **1 resolved:** PF-043 (P3, new ID) -- per-keystroke unconditional undo snapshot dupe (core.zig:378) made lazy via a conservative `keyMayMutate` predictor; pure cursor moves / history-nav now perform ZERO buffer dupes, and no-op edits (backspace-at-BOL, delete-at-EOL) skip dead undo entries; verified by counting-allocator + exhaustive predictor-guard tests (commit d039c05). PF-043 realizes the optimization PF-038 had declined; PF-038 stays Won't Do as originally scoped. **9 new findings recorded (all LOW/INFO/P3 backlog, none P0/P1):** PF-044 (P3, suspected -- defaultIo() fat Io struct per call, ~28 sites incl. render path; optimizer may fold; #128), PF-045 (Info -- compat.Mutex spinlock in single-threaded REPL; #129), PF-046 (P3 -- file.length() extra syscall per history append; #130), PF-047 (P3 -- heap alloc/free per history append for newline concat; #131), PF-048 (P3 -- UndoStack orderedRemove(0) O(n) eviction every ~100 keystrokes; #132; structural twin of the Won't-Do PF-039), PF-049 (Info -- 3x stderr writeAll per error message; #134), PF-050 (Info -- TerminalWriter 6+ syscalls per colored message; #135), PF-051 (Info, Deferred -- searchBackward per-keystroke re-scan O(N·patternlen)), PF-052 (Info, Won't Do -- UndoStack uncapped retained bytes). GitLab issues #128--#132, #134, #135 reconciled (PF-ID cross-references added as comments; **no duplicate issues created**). Severity distribution updated: 50 total, 15 open (5 P3, 10 Info), 28 resolved, 7 won't do. Overall posture remains Strong/Production-Ready; the only per-keystroke hot-path allocation (undo snapshot) was eliminated this cycle. |
 | 2026-03-25 (Phase 14 -- Gap Closure) | **PF-004 resolved.** Added persistent `append_handle: ?std.fs.File` field to history.zig; lazily opened on first append, reused for subsequent appends; closed in deinit() and reset in clear(). Syscalls reduced from 6 to 2 per history append (write+write). 3 tests added. GitLab issue #66 closed. Severity distribution updated: 40 total, 21 open (0 P2, 6 P3, 15 Info), 19 resolved. All other findings unchanged. |
 | 2026-03-25 (Phase 13 -- Audit Cycle 2, Phase 4) | Audit Cycle 2 perf-reviewer confirmation pass. All 22 open findings confirmed accurately classified. **Score adjustments:** PF-004 rescored 55->48 (6 syscalls run once per Enter key, not per keystroke; Impact 4 x Likelihood 3 x 4 = 48). PF-011 rescored 30->24 (256 alloc/free at ~25-50us total, once per Tab press; Impact 3 x Likelihood 2 x 4 = 24). **Description correction:** PF-023 corrected -- line 747 `stdout.writeAll` runs once on search entry, not per keystroke; actual per-keystroke cost is 1 write (line 795), not 2. **No new findings, no regressions, no GitLab issue changes.** Severity distribution unchanged: 40 total, 22 open (1 P2, 6 P3, 15 Info), 18 resolved. Overall posture confirmed Strong/Production-Ready. |
 | 2026-03-25 (Phase 12 review) | Phase 12 review: 0 new findings, 0 score adjustments, 0 regressions. All 22 open findings re-verified and confirmed still present and accurately described. **PF-004 evidence updated:** SF-024 security fix added +1 chmod syscall per history append (now 6 syscalls/append: open+write+write+chmod+close+fsync, up from 5). This further strengthens the case for a persistent file handle. **Overall posture:** Strong/Production-Ready for interactive REPL use. Keystroke-to-render latency ~5-20us (500-2000x below human perception threshold). **No GitLab issue changes** -- no issues created, updated, or closed. Severity distribution unchanged: 40 total, 22 open (1 P2, 6 P3, 15 Info), 18 resolved. |
