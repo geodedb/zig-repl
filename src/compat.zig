@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 CodePros
 
-//! Zig 0.16.0 compatibility layer
+//! Zig 0.15 → 0.16 migration shim (TEMPORARY)
 //!
 //! Bridges the 0.15 → 0.16 API gap for filesystem, I/O, and environment
 //! access. All helpers in this module use the global single-threaded Io
 //! instance so callers do not need to thread an Io parameter.
+//!
+//! WARNING: This module is a temporary migration shim and is expected to be
+//! retired once the codebase migrates fully onto the native 0.16 `std.Io`
+//! APIs. New callers SHOULD prefer the native `std.Io.File` / `std.Io.Dir`
+//! APIs directly and AVOID adding new dependencies on these helpers. See
+//! GAP_ANALYSIS.md (compat shim deprecation) for the tracking record.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -27,11 +33,6 @@ pub fn writeAll(file: File, data: []const u8) !void {
     return file.writeStreamingAll(defaultIo(), data);
 }
 
-/// Close a file (replacement for old file.close()).
-pub fn closeFile(file: File) void {
-    file.close(defaultIo());
-}
-
 /// Read all available bytes from a file into an allocator-owned buffer
 /// (replacement for old file.readToEndAlloc).
 pub fn readToEndAlloc(file: File, allocator: std.mem.Allocator, max_bytes: usize) ![]u8 {
@@ -43,53 +44,19 @@ pub fn readToEndAlloc(file: File, allocator: std.mem.Allocator, max_bytes: usize
     return buf[0..n];
 }
 
-/// Read into a caller-provided buffer (replacement for old file.readAll).
-pub fn readAll(file: File, buffer: []u8) !usize {
-    return file.readPositionalAll(defaultIo(), buffer, 0);
-}
-
-/// Seek to an absolute position (replacement for old file.seekTo).
-pub fn seekTo(file: File, pos: u64) void {
-    // In the new API, positional reads/writes handle offset directly.
-    // For compatibility, we just ignore this — callers should use
-    // readPositional/writePositional instead. This is a no-op stub.
-    _ = file;
-    _ = pos;
-}
-
-/// Get file length (replacement for old file.getEndPos).
-pub fn getEndPos(file: File) !u64 {
-    return file.length(defaultIo());
-}
-
 /// Set file permissions (replacement for old file.chmod).
+///
+/// On POSIX this performs a real `fchmod`-equivalent via
+/// `std.Io.File.setPermissions`, so callers can re-tighten the mode of an
+/// already-open file (e.g. a pre-existing config/history file that was
+/// created with looser permissions). On Windows there is no POSIX mode, so
+/// this is a documented no-op.
 pub fn chmod(file: File, mode: std.posix.mode_t) !void {
-    _ = file;
-    _ = mode;
-    // In 0.16.0, File.setPermissions API changed significantly.
-    // Permission enforcement is handled at the OS level via createFile options.
-    // This is intentionally a no-op.
-}
-
-/// Seek to end of file then write (replacement for old seekFromEnd + write pattern).
-pub fn seekFromEnd(file: File, offset: i64) !void {
-    _ = file;
-    _ = offset;
-    // In the new API, we use writePositional at the file length.
-    // This is handled directly in callers.
-}
-
-/// Write iovec data (replacement for old file.writev).
-pub fn writev(file: File, iovecs: []const std.posix.iovec_const) !usize {
-    // Flatten iovecs and write sequentially
-    var total: usize = 0;
-    for (iovecs) |iov| {
-        const data: [*]const u8 = @ptrCast(iov.base);
-        const slice = data[0..iov.len];
-        try writeAll(file, slice);
-        total += iov.len;
+    if (builtin.os.tag == .windows) {
+        // Windows has no POSIX permission bits; nothing to do.
+        return;
     }
-    return total;
+    try file.setPermissions(defaultIo(), std.Io.File.Permissions.fromMode(mode));
 }
 
 /// Read from a file into a buffer (replacement for old file.read).
@@ -102,64 +69,21 @@ pub fn read(file: File, buffer: []u8) !usize {
 // Directory helpers
 // =========================================================================
 
-/// Open a file relative to cwd (replacement for std.fs.cwd().openFile).
-pub fn cwdOpenFile(sub_path: []const u8, options: anytype) !File {
-    _ = options;
-    return Dir.cwd().openFile(defaultIo(), sub_path, .{});
-}
-
 /// Create a file relative to cwd (replacement for std.fs.cwd().createFile).
+///
+/// Forwards the relevant 0.16 `CreateFileOptions` fields so the returned
+/// `File` honors the caller's intent (e.g. `.read = true` keeps the handle
+/// readable). `flags` is a struct literal that may set any of `read`,
+/// `truncate`, `exclusive`, or `permissions`; omitted fields fall back to the
+/// 0.16 defaults.
 pub fn cwdCreateFile(sub_path: []const u8, flags: anytype) !File {
-    return Dir.cwd().createFile(defaultIo(), sub_path, .{ .truncate = flags.truncate });
-}
-
-/// Open a directory relative to cwd (replacement for std.fs.cwd().openDir).
-pub fn cwdOpenDir(sub_path: []const u8, options: anytype) !Dir {
-    _ = options;
-    return Dir.cwd().openDir(defaultIo(), sub_path, .{});
-}
-
-/// Close a directory.
-pub fn closeDir(dir: Dir) void {
-    dir.close(defaultIo());
-}
-
-/// Make a path relative to cwd (replacement for std.fs.cwd().makePath).
-pub fn cwdMakePath(sub_path: []const u8) !void {
-    try Dir.cwd().createDirPath(defaultIo(), sub_path);
-}
-
-/// Delete a file relative to cwd.
-pub fn cwdDeleteFile(sub_path: []const u8) !void {
-    try Dir.cwd().deleteFile(defaultIo(), sub_path);
-}
-
-/// Delete a directory tree relative to cwd.
-pub fn cwdDeleteTree(sub_path: []const u8) !void {
-    try Dir.cwd().deleteTree(defaultIo(), sub_path);
-}
-
-/// Stat a file relative to cwd.
-pub fn cwdStatFile(sub_path: []const u8) !std.Io.Dir.Stat {
-    return Dir.cwd().statFile(defaultIo(), sub_path, .{});
-}
-
-/// Get real path of "." relative to a dir, allocating result.
-pub fn dirRealpathAlloc(allocator: std.mem.Allocator, dir: Dir) ![]u8 {
-    // In 0.16.0, there's no realpathAlloc on Dir. Use /proc/self/fd/N on Linux.
-    if (builtin.os.tag == .linux) {
-        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        var fd_path_buf: [64:0]u8 = undefined;
-        const fd_path_slice = std.fmt.bufPrint(&fd_path_buf, "/proc/self/fd/{d}", .{dir.handle}) catch return error.NameTooLong;
-        fd_path_buf[fd_path_slice.len] = 0;
-        const fd_path_z: [*:0]const u8 = fd_path_buf[0..fd_path_slice.len :0];
-        const rc = std.os.linux.readlink(fd_path_z, &path_buf, path_buf.len);
-        if (std.os.linux.errno(rc) != .SUCCESS) return error.FileNotFound;
-        return allocator.dupe(u8, path_buf[0..rc]);
-    } else {
-        // Fallback: just return "."
-        return allocator.dupe(u8, ".");
-    }
+    const T = @TypeOf(flags);
+    return Dir.cwd().createFile(defaultIo(), sub_path, .{
+        .read = if (@hasField(T, "read")) flags.read else false,
+        .truncate = if (@hasField(T, "truncate")) flags.truncate else true,
+        .exclusive = if (@hasField(T, "exclusive")) flags.exclusive else false,
+        .permissions = if (@hasField(T, "permissions")) flags.permissions else .default_file,
+    });
 }
 
 // =========================================================================
@@ -282,9 +206,39 @@ pub const path = std.Io.Dir.path;
 pub const has_executable_bit = std.Io.File.Permissions.has_executable_bit;
 
 // =========================================================================
-// Dir iterate
+// Tests
 // =========================================================================
 
-pub fn dirIterate(dir: Dir) Dir.Iterator {
-    return dir.iterate();
+test "chmod re-tightens an existing file's mode (POSIX)" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime !has_executable_bit) return error.SkipZigTest;
+
+    const io = defaultIo();
+    const test_path = "/tmp/test_compat_chmod.tmp";
+    defer Dir.cwd().deleteFile(io, test_path) catch {};
+
+    // Create a file with a loose (0o644) mode.
+    {
+        const file = try Dir.cwd().createFile(io, test_path, .{
+            .truncate = true,
+            .permissions = @enumFromInt(0o644),
+        });
+        defer file.close(io);
+    }
+
+    // Sanity-check it started looser than the target.
+    {
+        const stat0 = try Dir.cwd().statFile(io, test_path, .{});
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o644), stat0.permissions.toMode() & 0o777);
+    }
+
+    // Re-tighten via compat.chmod on the open handle.
+    {
+        const file = try Dir.cwd().openFile(io, test_path, .{ .mode = .read_write });
+        defer file.close(io);
+        try chmod(file, 0o600);
+    }
+
+    const stat = try Dir.cwd().statFile(io, test_path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
 }

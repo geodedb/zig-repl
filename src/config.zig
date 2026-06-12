@@ -160,14 +160,7 @@ pub const Config = struct {
         const dir_path = std.fs.path.dirname(path) orelse ".";
         try std.Io.Dir.cwd().createDirPath(cio, dir_path);
 
-        var file = try std.Io.Dir.cwd().createFile(cio, path, .{ .truncate = true });
-        defer file.close(cio);
-
-        // Enforce permissions on pre-existing files
-        if (comptime std.Io.File.Permissions.has_executable_bit) {
-            compat.chmod(file, 0o600) catch {};
-        }
-
+        // Serialize the config into a fixed buffer first.
         var buf: [4096]u8 = undefined;
         var fbs: compat.FixedBufferStream = .init(&buf);
         const writer = fbs.writer();
@@ -181,8 +174,38 @@ pub const Config = struct {
         try writer.print("colors={s}\n", .{if (self.colors_enabled) "true" else "false"});
         try writer.print("max_history={d}\n", .{self.max_history});
 
-        try file.writeStreamingAll(cio, fbs.getWritten());
-        _ = allocator;
+        // Atomic write: write the full payload to a sibling temp file created
+        // with restrictive (0o600) permissions, then rename it over the real
+        // path. This guarantees the on-disk config is never world-readable and
+        // is never left half-written if the process dies mid-write (Q7).
+        const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
+        defer allocator.free(tmp_path);
+
+        // If a previous run left a stale temp file behind, remove it so the
+        // exclusive-free createFile below starts from a clean slate.
+        errdefer std.Io.Dir.cwd().deleteFile(cio, tmp_path) catch {};
+
+        {
+            var tmp_file = try std.Io.Dir.cwd().createFile(cio, tmp_path, .{
+                .truncate = true,
+                .permissions = @enumFromInt(0o600),
+            });
+            defer tmp_file.close(cio);
+
+            // createFile only applies `.permissions` when it creates the file;
+            // re-tighten in case a stale temp file pre-existed (POSIX; no-op
+            // on Windows).
+            if (comptime std.Io.File.Permissions.has_executable_bit) {
+                compat.chmod(tmp_file, 0o600) catch {};
+            }
+
+            try tmp_file.writeStreamingAll(cio, fbs.getWritten());
+        }
+
+        // Atomically replace the destination. rename() is atomic on POSIX and
+        // overwrites an existing target, so readers never observe a partial
+        // file and the 0o600 mode is carried over to the final path.
+        try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), path, cio);
     }
 };
 
@@ -382,6 +405,52 @@ test "saveToFile and loadFromFile round-trip" {
     try std.testing.expect(loaded.verbose);
     try std.testing.expect(!loaded.colors_enabled);
     try std.testing.expect(loaded.max_history == 999);
+}
+
+test "saveToFile creates config with 0o600 permissions" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime !std.Io.File.Permissions.has_executable_bit) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const io = compat.defaultIo();
+    const path = "/tmp/test_repl_config_perms.conf";
+    defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    var config = Config{};
+    config.keymap = .vi;
+    try config.saveToFile(allocator, path);
+
+    // The final config file must be created with restrictive permissions
+    // (run under the default umask), not world-readable.
+    const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
+}
+
+test "saveToFile is atomic and leaves no lingering temp file" {
+    const allocator = std.testing.allocator;
+    const io = compat.defaultIo();
+    const path = "/tmp/test_repl_config_atomic.conf";
+    const tmp_path = "/tmp/test_repl_config_atomic.conf.tmp";
+    defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
+
+    var config = Config{};
+    config.keymap = .vi;
+    config.max_history = 1234;
+    try config.saveToFile(allocator, path);
+
+    // The temp file used during the atomic write must not linger.
+    const tmp_exists = blk: {
+        var f = std.Io.Dir.cwd().openFile(io, tmp_path, .{}) catch break :blk false;
+        f.close(io);
+        break :blk true;
+    };
+    try std.testing.expect(!tmp_exists);
+
+    // The real config must round-trip.
+    const loaded = try Config.loadFromFile(allocator, path);
+    try std.testing.expect(loaded.keymap == .vi);
+    try std.testing.expect(loaded.max_history == 1234);
 }
 
 test "getDefaultConfigPath returns valid path" {

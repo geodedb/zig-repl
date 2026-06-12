@@ -196,8 +196,13 @@ pub const HistoryStore = struct {
                     return err;
                 };
 
-                // Permissions are enforced via createFile options on creation.
-                // For pre-existing files, the OS-level permissions remain as-is.
+                // createFile only applies `.permissions` when it *creates* the
+                // file; a pre-existing file keeps its old (possibly 0o644)
+                // mode. Re-tighten it explicitly (POSIX; no-op on Windows).
+                if (comptime compat.has_executable_bit) {
+                    compat.chmod(file, 0o600) catch {};
+                }
+
                 self.append_handle = file;
             }
 
@@ -241,6 +246,12 @@ pub const HistoryStore = struct {
             const file = std.Io.Dir.cwd().createFile(compat.defaultIo(), path, .{ .truncate = true, .permissions = @enumFromInt(0o600) }) catch {
                 return;
             };
+
+            // createFile only applies `.permissions` on creation; re-tighten a
+            // pre-existing file's mode explicitly (POSIX; no-op on Windows).
+            if (comptime compat.has_executable_bit) {
+                compat.chmod(file, 0o600) catch {};
+            }
 
             file.close(compat.defaultIo());
         }
@@ -471,6 +482,72 @@ test "history file permissions are 0o600" {
     // In 0.16.0, permissions is an enum; convert to mode_t for comparison
     const perm_bits = stat.permissions.toMode() & 0o777;
     try std.testing.expect(perm_bits == 0o600);
+}
+
+test "history append re-tightens pre-existing 0o644 file to 0o600" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime !compat.has_executable_bit) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const io = compat.defaultIo();
+
+    const path = "/tmp/test_repl_history_preexist_append.tmp";
+    defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    // Pre-create the history file with a loose (0o644) mode.
+    {
+        const file = try std.Io.Dir.cwd().createFile(io, path, .{
+            .truncate = true,
+            .permissions = @enumFromInt(0o644),
+        });
+        file.close(io);
+    }
+
+    // Confirm it started looser than the target.
+    {
+        const stat0 = try std.Io.Dir.cwd().statFile(io, path, .{});
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o644), stat0.permissions.toMode() & 0o777);
+    }
+
+    // Appending should re-tighten the pre-existing file.
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.append("secret_command");
+    }
+
+    const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
+}
+
+test "history clear re-tightens pre-existing 0o644 file to 0o600" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (comptime !compat.has_executable_bit) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const io = compat.defaultIo();
+
+    const path = "/tmp/test_repl_history_preexist_clear.tmp";
+    defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    // Pre-create the history file with a loose (0o644) mode.
+    {
+        const file = try std.Io.Dir.cwd().createFile(io, path, .{
+            .truncate = true,
+            .permissions = @enumFromInt(0o644),
+        });
+        file.close(io);
+    }
+
+    // Clearing should truncate AND re-tighten the pre-existing file.
+    {
+        var hist = try HistoryStore.init(allocator, path, true);
+        defer hist.deinit();
+        try hist.clear();
+    }
+
+    const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
 }
 
 test "history clear file permissions are 0o600" {
