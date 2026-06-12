@@ -1,6 +1,6 @@
 .{
     .name = .repl,
-    .version = "0.1.7",
+    .version = "0.1.9",
     .fingerprint = 0xc555ea454f750183,
     .minimum_zig_version = "0.16.0",
     .paths = .{
