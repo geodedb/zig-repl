@@ -4,7 +4,7 @@ This document describes the internal architecture of the Zig REPL Library.
 
 ## Module Structure
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        Application                          │
 │                    (Uses Repl.run())                        │
@@ -63,11 +63,15 @@ This document describes the internal architecture of the Zig REPL Library.
 
 ### core.zig - Main REPL Engine
 
-> **Size note:** core.zig exceeds the 800-line soft guideline at ~874 non-test
-> lines. Input parsing, rendering, search, text utilities, and undo have already
-> been extracted into dedicated modules. The remaining code is tightly coupled
-> REPL state management (buffer, cursor, action dispatch, paste handling) that
-> does not decompose further without fragmenting the core event loop.
+> **Size note:** core.zig exceeds the 800-line soft guideline at ~1194 non-test
+> lines (grew ~+288 in Audit Cycle 3 from the bracketed-paste carry-over state
+> machine and the lazy-undo mutation predictor: `processReadBuffer`,
+> `carryOverSplit`, `isMarkerPrefix`, `keyMayMutate`/`emacsKeyMayMutate`/
+> `viKeyMayMutate`). Input parsing, rendering, search, text utilities, and undo
+> have already been extracted into dedicated modules. The remaining code is
+> tightly coupled REPL state management (buffer, cursor, action dispatch, paste
+> handling) that does not decompose further without fragmenting the core event
+> loop. Tracked as QF-050 (Accepted).
 
 The core module contains:
 
@@ -79,7 +83,8 @@ The core module contains:
 - **`KeyAction`**: Actions returned from key handlers
 
 **Input Processing Pipeline:**
-```
+
+```text
 Raw bytes → parseKeyEvent() [input.zig] → KeyEvent → handleKey() [keymap_*.zig] → KeyAction → processAction()
 ```
 
@@ -198,7 +203,8 @@ Triggered by Ctrl+_ in Emacs mode and `u` in Vi normal mode.
 ## Data Flow
 
 ### Normal Input
-```
+
+```text
 1. User types character
 2. stdin.read() receives bytes
 3. parseKeyEvent() creates KeyEvent
@@ -208,7 +214,8 @@ Triggered by Ctrl+_ in Emacs mode and `u` in Vi normal mode.
 ```
 
 ### Command Execution
-```
+
+```text
 1. User presses Enter
 2. KeyAction.run returned
 3. Multi-line buffer assembled
@@ -223,7 +230,8 @@ Triggered by Ctrl+_ in Emacs mode and `u` in Vi normal mode.
 ```
 
 ### Tab Completion
-```
+
+```text
 1. User presses Tab
 2. KeyAction.complete returned
 3. complete_fn callback populates CompletionContext

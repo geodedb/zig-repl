@@ -504,7 +504,22 @@ def verify_target_integrity(
         ["git", "rev-list", "-n", "1", tref], cwd=target_repo.path, check=False
     )
     resolved_commit = resolved.stdout.strip() if resolved.returncode == 0 else ""
+    # The supplied #commit must be a real pin: a non-empty hex prefix of a
+    # sane length. Without this guard an empty or 1-2 char `tcommit` makes the
+    # `startswith` binding below vacuously true (e.g. `--target pkg=ref#`),
+    # silently accepting whatever commit the tag happens to resolve to.
+    _MIN_COMMIT_PIN = 7
+    tcommit_is_valid_pin = len(tcommit) >= _MIN_COMMIT_PIN and all(
+        c in "0123456789abcdefABCDEF" for c in tcommit
+    )
     if resolved_commit:
+        if not tcommit_is_valid_pin:
+            log(
+                f"  [integrity] REFUSING: --target commit pin "
+                f"'{tcommit}' is missing or too short; supply at least "
+                f"{_MIN_COMMIT_PIN} hex chars (full 40-char SHA preferred)."
+            )
+            return False
         if resolved_commit == tcommit or resolved_commit.startswith(tcommit):
             log(
                 f"  [integrity] tag {tref} resolves to supplied commit "
