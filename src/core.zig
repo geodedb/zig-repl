@@ -35,6 +35,65 @@ const RENDER_BUF_SIZE = 8192;
 /// Size of the fixed buffer used for accumulating bracketed-paste content.
 const PASTE_BUF_SIZE = 4096;
 
+/// Longest bracketed-paste marker is 6 bytes (`\x1b[200~` / `\x1b[201~`); a
+/// marker torn across a read boundary leaves at most 5 trailing bytes to carry
+/// into the next read.
+const PASTE_CARRY_MAX = 5;
+
+/// Safety bound: if `in_bracketed_paste` stays true across more reads than this
+/// without ever seeing a complete end marker, force-exit paste mode so a
+/// malformed/torn `\x1b[201~` cannot wedge the REPL indefinitely (ADV-001).
+/// A real paste streams its end marker within a handful of reads; 4096 reads of
+/// up-to-256 bytes is ~1 MiB of unterminated paste, far beyond any legitimate
+/// interactive paste, so reaching it means the terminal never sent (or we lost)
+/// the end marker.
+const PASTE_MAX_READS_WITHOUT_END = 4096;
+
+/// Hard cap on total bytes accumulated in a single paste before we force-exit
+/// paste mode (ADV-001). Independent of PASTE_BUF_SIZE flush cycles: this counts
+/// cumulative paste bytes across flushes. 16 MiB is generous for an interactive
+/// paste yet bounded so a stuck end marker cannot grow memory without limit.
+const PASTE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
+/// Persistent bracketed-paste accumulation state.
+///
+/// Hoisted out of the per-`read(2)` loop in `processInput` so paste content and
+/// torn markers survive across read boundaries (ADV-001 / issue #142). Without
+/// this, a paste larger than the OS read buffer, or an end marker split across
+/// two reads, either lost data or wedged the REPL in paste mode forever.
+const PasteState = struct {
+    /// Accumulated paste content not yet flushed into the edit buffer.
+    buf: [PASTE_BUF_SIZE]u8 = undefined,
+    /// Number of valid bytes in `buf`.
+    len: usize = 0,
+    /// Bytes held back because they form a proper prefix of a paste marker that
+    /// was torn across a read boundary; prepended to the next read's data.
+    carry: [PASTE_CARRY_MAX]u8 = undefined,
+    /// Number of valid bytes in `carry`.
+    carry_len: usize = 0,
+    /// Number of consecutive reads spent in paste mode without seeing an end
+    /// marker. Reset to 0 whenever a complete end marker is consumed.
+    reads_in_paste: usize = 0,
+    /// Cumulative paste-content bytes seen for the current paste, counted across
+    /// flush cycles (so it reflects TOTAL size, not just unflushed `len`). Reset
+    /// to 0 when a paste closes (end marker consumed or force-exit), so it is 0
+    /// at the start of the next paste.
+    total_bytes: usize = 0,
+
+    /// Force-exit paste mode: flush whatever was collected and clear paste
+    /// flags so the prompt recovers. Used by the safety bounds.
+    fn forceExit(self: *PasteState, state: *ReplState, last_action: *KeyAction) void {
+        if (self.len > 0) {
+            flushPasteBuffer(state, &self.buf, &self.len, last_action);
+        }
+        state.in_bracketed_paste = false;
+        state.paste_strip_leading = false;
+        self.reads_in_paste = 0;
+        self.total_bytes = 0;
+        self.carry_len = 0;
+    }
+};
+
 /// Keymap selection.
 /// Unified with Config.Keymap from config.zig; includes fromString() for parsing.
 pub const Keymap = @import("config.zig").Config.Keymap;
@@ -353,57 +412,32 @@ fn renderPrompt(state: *ReplState) !void {
 
 fn processInput(state: *ReplState) !void {
     const stdin = platform.getStdinHandle();
-    var buf: [256]u8 = undefined;
+    // Read buffer plus room to prepend any carried-over torn-marker bytes from
+    // the previous read.
+    var buf: [PASTE_CARRY_MAX + 256]u8 = undefined;
+
+    // PasteState is hoisted ABOVE the read loop so paste accumulation and torn
+    // markers persist across `read(2)` boundaries (ADV-001 / issue #142).
+    var paste_state = PasteState{};
 
     outer: while (true) {
-        const n = try compat.read(stdin, &buf);
+        // Read fresh data after any carried-over bytes, so the carry (a torn
+        // marker prefix from the previous read) can be re-examined contiguously.
+        const carry_len = paste_state.carry_len;
+        const n = try compat.read(stdin, buf[carry_len .. carry_len + 256]);
+        // No new data: leave any carry intact for the next non-empty read
+        // rather than reprocessing it in a tight loop.
         if (n == 0) continue;
 
-        var last_action: KeyAction = .none;
-        var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
-        var paste_len: usize = 0;
-
-        var i: usize = 0;
-        while (i < n) {
-            if (consumeBracketedPaste(buf[0..n], &i, state, &paste_buf, &paste_len, &last_action)) continue;
-
-            const remaining = buf[i..n];
-            const key_event = parseKeyEvent(remaining) catch break;
-            i += getKeyEventLength(remaining);
-
-            // Snapshot buffer state before the keymap handler runs, since
-            // some keymaps (emacs, vi) modify the buffer directly for
-            // insert actions.  The snapshot is kept only if the resulting
-            // action is destructive; otherwise it is discarded.
-            const pre_buffer = state.allocator.dupe(u8, state.buffer.items) catch null;
-            const pre_cursor = state.cursor;
-
-            const action = switch (state.keymap) {
-                .emacs => keymap_emacs.handleKey(state, key_event),
-                .vi => keymap_vi.handleKey(state, key_event),
-            };
-
-            // Determine if this action modifies buffer content.
-            const is_destructive = switch (action) {
-                .insert, .insert_tab, .reverse_tab, .backspace, .delete_char, .delete_char_forward, .delete_word, .delete_word_backward, .delete_to_eol, .delete_to_bol, .yank => true,
-                else => false,
-            };
-
-            if (is_destructive) {
-                if (pre_buffer) |buf_snap| {
-                    // pushOwned takes ownership; no extra free needed.
-                    state.undo_stack.pushOwned(buf_snap, pre_cursor) catch {
-                        // On error, we still own the buffer.
-                        state.allocator.free(buf_snap);
-                    };
-                }
-            } else {
-                if (pre_buffer) |buf_snap| state.allocator.free(buf_snap);
-            }
-
-            processAction(state, action) catch break;
-            last_action = action;
+        // Now that we have fresh bytes, prepend the carry contiguously.
+        if (carry_len > 0) {
+            @memcpy(buf[0..carry_len], paste_state.carry[0..carry_len]);
+            paste_state.carry_len = 0;
         }
+        const total = carry_len + n;
+
+        var last_action: KeyAction = .none;
+        processReadBuffer(state, &paste_state, buf[0..total], &last_action) catch break;
 
         if (!state.in_bracketed_paste and !platform.stdinHasMoreData()) {
             renderPrompt(state) catch |err| {
@@ -426,6 +460,260 @@ fn processInput(state: *ReplState) !void {
             state.quit_requested = true;
             break :outer;
         }
+    }
+}
+
+/// Process one read's worth of input bytes against the persistent REPL and
+/// paste state. Extracted from `processInput` so it is unit-testable without a
+/// TTY (GAP-0072 / #52): tests feed scripted byte slices and assert on
+/// `state.buffer`/`state.cursor`/`last_action`.
+///
+/// `data` is one logical read (carried-over torn-marker bytes already
+/// prepended). On return, any trailing proper-prefix of a paste marker has been
+/// moved into `paste_state.carry` to be re-examined with the next read.
+///
+/// Paste-mode safety bounds (ADV-001): if paste mode persists across too many
+/// reads with no end marker, or total paste bytes exceed a hard cap, we
+/// force-exit paste mode so a torn/malformed end marker cannot wedge the REPL.
+fn processReadBuffer(
+    state: *ReplState,
+    paste_state: *PasteState,
+    data: []const u8,
+    last_action: *KeyAction,
+) !void {
+    // Per-read paste-mode safety accounting (ADV-001).
+    const was_in_paste = state.in_bracketed_paste;
+    if (was_in_paste) {
+        paste_state.reads_in_paste += 1;
+        if (paste_state.reads_in_paste > PASTE_MAX_READS_WITHOUT_END) {
+            paste_state.forceExit(state, last_action);
+        }
+    }
+
+    // Hold back a trailing proper-prefix of a paste marker so it is not
+    // misinterpreted as paste content / a torn escape (ADV-001). The carried
+    // bytes are re-examined prepended to the next read.
+    const usable = carryOverSplit(data, paste_state, state.in_bracketed_paste);
+
+    var i: usize = 0;
+    while (i < usable) {
+        const before = i;
+        const was_pasting = state.in_bracketed_paste;
+        if (consumeBracketedPaste(data[0..usable], &i, state, &paste_state.buf, &paste_state.len, last_action)) {
+            if (state.in_bracketed_paste) {
+                // Count cumulative paste-content bytes consumed this step
+                // (i advanced by 1 per content byte; marker handling toggles
+                // the flag). This survives flush cycles where paste_state.len
+                // resets, so the hard cap reflects TOTAL paste size (ADV-001).
+                if (was_pasting) paste_state.total_bytes += (i - before);
+                if (paste_state.total_bytes > PASTE_MAX_TOTAL_BYTES) {
+                    paste_state.forceExit(state, last_action);
+                }
+            } else {
+                // End marker consumed (or never entered paste): paste closed.
+                paste_state.reads_in_paste = 0;
+                paste_state.total_bytes = 0;
+            }
+            continue;
+        }
+
+        const remaining = data[i..usable];
+        const key_event = parseKeyEvent(remaining) catch break;
+        i += getKeyEventLength(remaining);
+
+        // Snapshot the pre-edit buffer LAZILY: only keys that *can* mutate the
+        // buffer take a snapshot (perf NEW-1). Pure cursor moves / history nav
+        // no longer dupe+memcpy+free the whole line on every keystroke.
+        //
+        // The snapshot is taken BEFORE the keymap handler because some keymaps
+        // (emacs/vi) mutate the buffer in-place inside handleKey for inserts.
+        // Whether to KEEP the snapshot is decided AFTER processAction, since
+        // delete-class actions mutate inside processAction -- comparing the
+        // pre-state against the final buffer is the only point that correctly
+        // detects a real change for both insert- and delete-class actions.
+        const may_mutate = keyMayMutate(state, key_event);
+        const pre_buffer: ?[]u8 = if (may_mutate)
+            (state.allocator.dupe(u8, state.buffer.items) catch null)
+        else
+            null;
+        const pre_cursor = state.cursor;
+
+        const action = switch (state.keymap) {
+            .emacs => keymap_emacs.handleKey(state, key_event),
+            .vi => keymap_vi.handleKey(state, key_event),
+        };
+
+        // Determine if this action modifies buffer content.
+        const is_destructive = switch (action) {
+            .insert, .insert_tab, .reverse_tab, .backspace, .delete_char, .delete_char_forward, .delete_word, .delete_word_backward, .delete_to_eol, .delete_to_bol, .yank => true,
+            else => false,
+        };
+
+        processAction(state, action) catch {
+            if (pre_buffer) |buf_snap| state.allocator.free(buf_snap);
+            break;
+        };
+        last_action.* = action;
+
+        if (pre_buffer) |buf_snap| {
+            // Keep the snapshot only if the action was destructive AND the
+            // buffer actually changed (perf NEW-2: skip dead undo entries for
+            // no-op edits such as backspace-at-BOL or delete-at-EOL).
+            const changed = is_destructive and !std.mem.eql(u8, buf_snap, state.buffer.items);
+            if (changed) {
+                // pushOwned takes ownership; no extra free needed.
+                state.undo_stack.pushOwned(buf_snap, pre_cursor) catch {
+                    // On error, we still own the buffer.
+                    state.allocator.free(buf_snap);
+                };
+            } else {
+                state.allocator.free(buf_snap);
+            }
+        }
+    }
+}
+
+/// Returns the number of leading bytes of `data` that are safe to process now.
+/// If `data` ends with a proper (incomplete) prefix of a bracketed-paste marker
+/// (`\x1b[200~` / `\x1b[201~`), those trailing bytes are copied into
+/// `paste_state.carry` and excluded so the torn marker can be re-assembled with
+/// the next read (ADV-001).
+///
+/// `in_paste` selects the conservative handling of a lone trailing `\x1b`:
+/// outside paste mode a bare ESC is processed immediately (preserving the
+/// terminal's existing ESC-key latency, important for vi mode-switching); in
+/// paste mode it is held back because it may begin a torn end marker.
+fn carryOverSplit(data: []const u8, paste_state: *PasteState, in_paste: bool) usize {
+    // Examine up to the last PASTE_CARRY_MAX bytes for an ESC-led proper prefix
+    // of a marker. The earliest such ESC position gives the longest carry.
+    const start = if (data.len > PASTE_CARRY_MAX) data.len - PASTE_CARRY_MAX else 0;
+    var p = start;
+    while (p < data.len) : (p += 1) {
+        if (data[p] != 0x1b) continue;
+        const tail = data[p..];
+        // A complete marker (6 bytes) is NOT carried -- it is consumed normally.
+        if (tail.len >= 6) {
+            // Could still be an ESC that is not a marker; let normal parsing
+            // handle it. Only carry strict proper-prefixes (len 1..5).
+            continue;
+        }
+        // A lone trailing ESC outside paste mode is left for immediate handling
+        // (bare-ESC key); only carry it when a torn end marker is possible.
+        if (tail.len == 1 and !in_paste) break;
+        if (isMarkerPrefix(tail)) {
+            @memcpy(paste_state.carry[0..tail.len], tail);
+            paste_state.carry_len = tail.len;
+            return p;
+        }
+        // ESC found but not a marker prefix: leave it for normal parsing.
+        break;
+    }
+    return data.len;
+}
+
+/// True if `s` (length 1..5) is a proper prefix of `\x1b[200~` or `\x1b[201~`.
+fn isMarkerPrefix(s: []const u8) bool {
+    if (s.len == 0 or s.len >= 6) return false;
+    const start_marker = "\x1b[200~";
+    const end_marker = "\x1b[201~";
+    return std.mem.eql(u8, s, start_marker[0..s.len]) or
+        std.mem.eql(u8, s, end_marker[0..s.len]);
+}
+
+/// Cheap pre-handler prediction of whether a key event can mutate the edit
+/// buffer, so we only snapshot for undo when a mutation is actually possible
+/// (perf NEW-1). Pure navigation, history nav, control, and unknown keys return
+/// false and skip the dupe+memcpy+free entirely.
+///
+/// CORRECTNESS CONTRACT: this MUST be a conservative over-approximation. It is
+/// only allowed to return `false` for keys that can NEVER mutate the buffer in
+/// the given keymap/mode; returning `false` for a mutating key would silently
+/// break undo. It is free to return `true` for keys that turn out non-mutating
+/// (e.g. backspace-at-BOL) -- the post-handler "did the buffer actually change"
+/// check in `processReadBuffer` discards those dead snapshots (perf NEW-2).
+///
+/// Keep this in sync with keymap_emacs.handleKey / keymap_vi.handleKey: when in
+/// doubt for a key, return true.
+fn keyMayMutate(state: *const ReplState, key_event: KeyEvent) bool {
+    return switch (state.keymap) {
+        .emacs => emacsKeyMayMutate(key_event),
+        .vi => viKeyMayMutate(state.vi_mode, state.pending_operator, key_event),
+    };
+}
+
+/// Conservative mutation predictor for the Emacs keymap. Mirrors the
+/// destructive arms of keymap_emacs.handleKey (insert / backspace / delete* /
+/// reverse_tab / yank). Everything else (movement, history, search, complete,
+/// clear, run/cancel/quit, ESC, unknown) is non-mutating.
+fn emacsKeyMayMutate(key: KeyEvent) bool {
+    if (key.ctrl and key.alt) {
+        // Only Shift+Tab (reverse_tab) mutates here.
+        return key.key == 'i';
+    }
+    if (key.ctrl) {
+        return switch (key.key) {
+            // delete_char/quit (d), delete_to_eol (k), delete_to_bol (u),
+            // delete_word_backward (w), yank (y), undo restores buffer (0x7f).
+            'd', 'k', 'u', 'w', 'y', 0x7f => true,
+            else => false,
+        };
+    }
+    if (key.alt) {
+        return switch (key.key) {
+            'd', 'w' => true, // delete_word / delete_word_backward
+            else => false,
+        };
+    }
+    // Printable insert.
+    if (key.key >= 0x20 and key.key < 0x7f) return true;
+    // Backspace (DEL/BS) and forward Delete mutate.
+    return switch (key.key) {
+        0x7f, 0x08, input_mod.SyntheticKey.delete => true,
+        else => false,
+    };
+}
+
+/// Conservative mutation predictor for the Vi keymap. Because Vi normal mode
+/// mutates the buffer directly inside handleKey for many commands (o, O, dd,
+/// dw, db, de, cc, cw, r<char>, s, S, x, X, p, ...), and a pending operator
+/// makes the NEXT key destructive, this errs heavily toward `true` in normal
+/// mode and only excludes keys that are unambiguously pure motion / mode
+/// switches / history nav. Insert mode mirrors the Emacs predictor.
+fn viKeyMayMutate(vi_mode: keymap_vi.ViMode, pending_operator: ?u8, key: KeyEvent) bool {
+    switch (vi_mode) {
+        .insert => {
+            if (key.ctrl and key.alt) return key.key == 'i'; // reverse_tab
+            if (key.ctrl) {
+                return switch (key.key) {
+                    'd', 'w', 'u', 'k', 'y' => true,
+                    else => false,
+                };
+            }
+            if (key.alt) return key.key == 'd';
+            if (key.key >= 0x20 and key.key < 0x7f) return true;
+            return switch (key.key) {
+                0x7f, 0x08, input_mod.SyntheticKey.delete => true,
+                else => false,
+            };
+        },
+        .normal => {
+            // A pending operator (d/c/r) makes the NEXT key destructive
+            // (e.g. de, cw, r<char>); always snapshot.
+            if (pending_operator != null) return true;
+            if (key.ctrl and key.alt) return key.key == 'i'; // reverse_tab
+            if (key.ctrl) {
+                // Only Ctrl+D can mutate (delete_char) in normal mode.
+                return key.key == 'd';
+            }
+            if (key.alt) return false; // word motions only
+            // Pure-motion / mode / history / non-mutating normal-mode keys.
+            // Anything NOT in this allow-list is treated as possibly mutating,
+            // covering pending-operator state and direct-mutation commands.
+            return switch (key.key) {
+                'h', 'l', 'j', 'k', '0', '^', '$', 'w', 'b', 'e', 'G', 'g', 0x1b => false,
+                else => true,
+            };
+        },
     }
 }
 
@@ -1573,4 +1861,548 @@ test "processAction: complete without function is no-op" {
 
     try processAction(&state, .complete);
     try std.testing.expectEqualStrings("hel", state.buffer.items);
+}
+
+// ============================================================================
+// ADV-001 / issue #142: bracketed-paste persistence across read() boundaries
+//
+// These tests drive the paste path across MULTIPLE independent read batches by
+// calling processReadBuffer with separate input slices, mirroring how
+// processInput loops over successive read(2) results with persistent state.
+// ============================================================================
+
+/// Helper: feed a sequence of independent "read batches" through
+/// processReadBuffer with a single persistent PasteState, exactly as
+/// processInput would across successive read(2) calls (including carry-over of
+/// torn markers between batches).
+fn feedBatches(state: *ReplState, paste_state: *PasteState, batches: []const []const u8) !KeyAction {
+    var last_action: KeyAction = .none;
+    var combined: [PASTE_CARRY_MAX + 4096]u8 = undefined;
+    for (batches) |batch| {
+        const carry_len = paste_state.carry_len;
+        std.debug.assert(carry_len + batch.len <= combined.len);
+        if (carry_len > 0) {
+            @memcpy(combined[0..carry_len], paste_state.carry[0..carry_len]);
+            paste_state.carry_len = 0;
+        }
+        @memcpy(combined[carry_len .. carry_len + batch.len], batch);
+        try processReadBuffer(state, paste_state, combined[0 .. carry_len + batch.len], &last_action);
+    }
+    return last_action;
+}
+
+test "ADV-001: large paste (>256B) split across reads loses zero bytes" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // 600 'X' bytes, split into 256-byte reads, with start/end markers in
+    // separate batches. The old code reset paste_len every read -> data loss.
+    const content_size = 600;
+    var content: [content_size]u8 = undefined;
+    @memset(&content, 'X');
+
+    // Batch 1: start marker + first 250 content bytes
+    var b1: [6 + 250]u8 = undefined;
+    @memcpy(b1[0..6], "\x1b[200~");
+    @memcpy(b1[6..], content[0..250]);
+    // Batch 2: next 250 content bytes (no markers)
+    const b2 = content[250..500];
+    // Batch 3: final 100 content bytes + end marker
+    var b3: [100 + 6]u8 = undefined;
+    @memcpy(b3[0..100], content[500..600]);
+    @memcpy(b3[100..], "\x1b[201~");
+
+    _ = try feedBatches(&state, &paste_state, &.{ &b1, b2, &b3 });
+
+    try std.testing.expectEqual(@as(usize, content_size), state.buffer.items.len);
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+    for (state.buffer.items) |c| try std.testing.expectEqual(@as(u8, 'X'), c);
+}
+
+test "ADV-001: very large paste (>4096B) split across many reads loses zero bytes" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // 5000 bytes (> PASTE_BUF_SIZE=4096) streamed in 256-byte reads so flushes
+    // happen mid-stream while paste accumulation must persist across reads.
+    const content_size = 5000;
+    var content: [content_size]u8 = undefined;
+    for (0..content_size) |j| content[j] = @as(u8, @intCast(0x41 + (j % 26)));
+
+    var batches = std.ArrayList([]const u8).initCapacity(allocator, 0) catch unreachable;
+    defer batches.deinit(allocator);
+
+    // First batch carries the start marker; remaining batches are raw content.
+    var first: [6 + 200]u8 = undefined;
+    @memcpy(first[0..6], "\x1b[200~");
+    @memcpy(first[6..], content[0..200]);
+    try batches.append(allocator, &first);
+
+    var off: usize = 200;
+    while (off < content_size) {
+        const end = @min(off + 256, content_size);
+        try batches.append(allocator, content[off..end]);
+        off = end;
+    }
+    try batches.append(allocator, "\x1b[201~");
+
+    _ = try feedBatches(&state, &paste_state, batches.items);
+
+    try std.testing.expectEqual(@as(usize, content_size), state.buffer.items.len);
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+    for (state.buffer.items, 0..) |c, j| {
+        try std.testing.expectEqual(@as(u8, @intCast(0x41 + (j % 26))), c);
+    }
+}
+
+test "ADV-001: torn end marker across reads -- REPL recovers, keystroke not swallowed" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Batch 1: start marker + "abc" + the FIRST 5 bytes of the end marker
+    // ("\x1b[201"). The 6th byte ("~") arrives in batch 2. The old code would
+    // consume "\x1b[201" as paste content and stay wedged in paste mode.
+    const b1 = "\x1b[200~abc\x1b[201";
+    // Batch 2: the trailing "~" completes the end marker, then a normal key.
+    const b2 = "~d";
+
+    _ = try feedBatches(&state, &paste_state, &.{ b1, b2 });
+
+    // Paste mode must have exited cleanly (recovery), not stayed wedged.
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+    // "abc" pasted, then the post-paste 'd' keystroke processed normally.
+    try std.testing.expectEqualStrings("abcd", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 4), state.cursor);
+}
+
+test "ADV-001: torn start marker across reads is reassembled" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Start marker split: batch 1 ends with "\x1b[20", batch 2 begins "0~hi"
+    // then the end marker.
+    const b1 = "\x1b[20";
+    const b2 = "0~hi\x1b[201~";
+
+    _ = try feedBatches(&state, &paste_state, &.{ b1, b2 });
+
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+    try std.testing.expectEqualStrings("hi", state.buffer.items);
+}
+
+test "ADV-001: safety bound force-exits paste mode when end marker never arrives" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Open a paste, then feed many reads of content with NO end marker.
+    _ = try feedBatches(&state, &paste_state, &.{"\x1b[200~"});
+    try std.testing.expectEqual(true, state.in_bracketed_paste);
+
+    // Drive past PASTE_MAX_READS_WITHOUT_END reads of plain content.
+    var last_action: KeyAction = .none;
+    var k: usize = 0;
+    while (k <= PASTE_MAX_READS_WITHOUT_END + 1) : (k += 1) {
+        try processReadBuffer(&state, &paste_state, "z", &last_action);
+        if (!state.in_bracketed_paste) break;
+    }
+
+    // The REPL must have recovered rather than wedging forever.
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+
+    // A subsequent normal keystroke is processed, not swallowed.
+    const before_len = state.buffer.items.len;
+    try processReadBuffer(&state, &paste_state, "Q", &last_action);
+    try std.testing.expectEqual(before_len + 1, state.buffer.items.len);
+    try std.testing.expectEqual(@as(u8, 'Q'), state.buffer.items[state.buffer.items.len - 1]);
+}
+
+test "ADV-001: lone trailing ESC outside paste is handled immediately (not carried)" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // A bare ESC at the end of a read, NOT in paste mode, must be consumed now
+    // (emacs ESC -> .none), leaving no carry for the next read.
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "ab\x1b", &last_action);
+
+    try std.testing.expectEqualStrings("ab", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), paste_state.carry_len);
+}
+
+test "ADV-001: contiguous paste (single batch) still works" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    _ = try feedBatches(&state, &paste_state, &.{"\x1b[200~hello world\x1b[201~"});
+
+    try std.testing.expectEqualStrings("hello world", state.buffer.items);
+    try std.testing.expectEqual(false, state.in_bracketed_paste);
+}
+
+// ============================================================================
+// GAP-0072 / #52: processReadBuffer pipeline tests (mock-stdin, no TTY)
+// ============================================================================
+
+test "processReadBuffer: plain text inserts into buffer" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "hello", &last_action);
+
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 5), state.cursor);
+    try std.testing.expectEqual(KeyAction.insert, last_action);
+}
+
+test "processReadBuffer: control keys (left arrow) move cursor without mutation" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    var last_action: KeyAction = .none;
+    // "ab" then Left arrow (ESC[D) then Left arrow.
+    try processReadBuffer(&state, &paste_state, "ab\x1b[D", &last_action);
+    try std.testing.expectEqualStrings("ab", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.cursor);
+    try std.testing.expectEqual(KeyAction.move_left, last_action);
+}
+
+test "processReadBuffer: Enter produces run action" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "cmd\r", &last_action);
+
+    try std.testing.expectEqualStrings("cmd", state.buffer.items);
+    try std.testing.expectEqual(KeyAction.run, last_action);
+}
+
+test "processReadBuffer: backspace deletes and records undo" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    var last_action: KeyAction = .none;
+    // Type "abc" (3 inserts -> 3 undo entries) then backspace (1 more).
+    try processReadBuffer(&state, &paste_state, "abc\x7f", &last_action);
+
+    try std.testing.expectEqualStrings("ab", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 2), state.cursor);
+    // Each mutation snapshotted: 3 inserts + 1 backspace = 4 undo entries.
+    try std.testing.expectEqual(@as(usize, 4), state.undo_stack.len());
+
+    // Undo restores the backspaced char.
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("abc", state.buffer.items);
+}
+
+test "processReadBuffer: multi-read paste embedded in a typed line submits correctly" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Type "a", paste "BC" split across two reads, type "d", then Enter.
+    const last = try feedBatches(&state, &paste_state, &.{
+        "a\x1b[200~B",
+        "C\x1b[201~d\r",
+    });
+
+    try std.testing.expectEqualStrings("aBCd", state.buffer.items);
+    try std.testing.expectEqual(KeyAction.run, last);
+}
+
+// ============================================================================
+// perf NEW-1 / NEW-2: lazy undo snapshot (no dupe on pure cursor moves)
+// ============================================================================
+
+/// Allocator wrapper that counts the number of allocations larger than a
+/// threshold, used to prove that pure cursor-movement keys perform ZERO buffer
+/// dupes (perf NEW-1).
+const CountingAllocator = struct {
+    backing: std.mem.Allocator,
+    alloc_count: usize = 0,
+    min_size: usize,
+
+    fn allocator(self: *CountingAllocator) std.mem.Allocator {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .remap = remap,
+                .free = free,
+            },
+        };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
+        if (len >= self.min_size) self.alloc_count += 1;
+        return self.backing.rawAlloc(len, alignment, ret_addr);
+    }
+
+    fn resize(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
+        return self.backing.rawResize(buf, alignment, new_len, ret_addr);
+    }
+
+    fn remap(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
+        return self.backing.rawRemap(buf, alignment, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *CountingAllocator = @ptrCast(@alignCast(ctx));
+        self.backing.rawFree(buf, alignment, ret_addr);
+    }
+};
+
+test "perf NEW-1: pure cursor moves perform zero buffer dupes" {
+    var counting = CountingAllocator{ .backing = std.testing.allocator, .min_size = 8 };
+    const allocator = counting.allocator();
+
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Pre-fill a 16-char line so any snapshot dupe (>= min_size) would be
+    // counted.
+    var fill: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "0123456789abcdef", &fill);
+
+    // Reset the counter AFTER the inserts (those legitimately dupe).
+    counting.alloc_count = 0;
+
+    // Now drive ONLY cursor-movement / navigation keys against the filled line:
+    // Left, Right, Home (Ctrl+A), End (Ctrl+E), word-left (ESC[1;5D-> handled),
+    // plain Ctrl+B / Ctrl+F.
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "\x1b[D", &last_action); // Left
+    try processReadBuffer(&state, &paste_state, "\x1b[C", &last_action); // Right
+    try processReadBuffer(&state, &paste_state, "\x01", &last_action); // Ctrl+A move_bol
+    try processReadBuffer(&state, &paste_state, "\x05", &last_action); // Ctrl+E move_eol
+    try processReadBuffer(&state, &paste_state, "\x02", &last_action); // Ctrl+B move_left
+    try processReadBuffer(&state, &paste_state, "\x06", &last_action); // Ctrl+F move_right
+
+    // ZERO large allocations: no buffer dupes for pure navigation (perf NEW-1).
+    try std.testing.expectEqual(@as(usize, 0), counting.alloc_count);
+    // Buffer is unchanged by navigation.
+    try std.testing.expectEqualStrings("0123456789abcdef", state.buffer.items);
+}
+
+test "perf NEW-1: insert/backspace sequence still builds correct undo history" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    var last_action: KeyAction = .none;
+    // 5 inserts.
+    try processReadBuffer(&state, &paste_state, "hello", &last_action);
+    try std.testing.expectEqual(@as(usize, 5), state.undo_stack.len());
+
+    // 2 backspaces (each mutates -> snapshot).
+    try processReadBuffer(&state, &paste_state, "\x7f\x7f", &last_action);
+    try std.testing.expectEqualStrings("hel", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 7), state.undo_stack.len());
+
+    // Undo walks back correctly.
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("hell", state.buffer.items);
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("hello", state.buffer.items);
+}
+
+test "perf NEW-2: no-op backspace at BOL does not push a dead undo entry" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    var paste_state = PasteState{};
+
+    // Cursor at beginning, buffer non-empty: backspace is a no-op.
+    try state.buffer.appendSlice(allocator, "abc");
+    state.cursor = 0;
+
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "\x7f", &last_action);
+
+    // Buffer unchanged AND no dead undo entry recorded (perf NEW-2).
+    try std.testing.expectEqualStrings("abc", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 0), state.undo_stack.len());
+}
+
+test "keyMayMutate: classifies common keys correctly (emacs)" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    state.keymap = .emacs;
+
+    // Mutating.
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 'a' })); // insert
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 0x7f })); // backspace
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 'k', .ctrl = true })); // kill-eol
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 'y', .ctrl = true })); // yank
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 'd', .alt = true })); // delete-word
+
+    // Non-mutating navigation / control.
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 'b', .ctrl = true })); // move_left
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 'f', .ctrl = true })); // move_right
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 'a', .ctrl = true })); // move_bol
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 'p', .ctrl = true })); // history_prev
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 0x1b })); // ESC
+}
+
+test "keyMayMutate: vi pending operator forces snapshot" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    state.keymap = .vi;
+    state.vi_mode = .normal;
+
+    // Pure motion when no operator pending.
+    try std.testing.expect(!keyMayMutate(&state, .{ .key = 'e' }));
+    // With a pending 'd' operator, the next 'e' (de) is destructive.
+    state.pending_operator = 'd';
+    try std.testing.expect(keyMayMutate(&state, .{ .key = 'e' }));
+}
+
+// SAFETY-PROPERTY GUARD (perf NEW-1 correctness contract):
+//
+// For every possible KeyEvent and every keymap/mode, if running the real keymap
+// handler either (a) returns a destructive action OR (b) mutates the edit buffer
+// in-place inside handleKey, then `keyMayMutate` MUST have predicted `true`. A
+// `false` prediction for such a key would silently drop the undo snapshot -- this
+// test fails loudly if the predictor ever drifts out of sync with the handlers.
+test "keyMayMutate: never under-predicts a mutating key (exhaustive)" {
+    const allocator = std.testing.allocator;
+
+    const Mode = enum { emacs, vi_normal, vi_insert };
+    const modes = [_]Mode{ .emacs, .vi_normal, .vi_insert };
+    const pendings = [_]?u8{ null, 'd', 'c', 'r' };
+
+    for (modes) |mode| {
+        for (pendings) |pending| {
+            // Vi-only: pending operators only meaningful in vi normal mode.
+            if (pending != null and mode != .vi_normal) continue;
+
+            var key: u16 = 0;
+            while (key <= 0xff) : (key += 1) {
+                const ctrl_opts = [_]bool{ false, true };
+                const alt_opts = [_]bool{ false, true };
+                for (ctrl_opts) |ctrl| {
+                    for (alt_opts) |alt| {
+                        const ev = KeyEvent{ .key = @intCast(key), .ctrl = ctrl, .alt = alt };
+
+                        // Fresh state per key so in-handler mutations are
+                        // observed against a known pre-buffer.
+                        var hist = try history_mod.HistoryStore.init(allocator, null, false);
+                        defer hist.deinit();
+                        var state = createTestState(allocator, &hist);
+                        defer state.deinit();
+                        try state.buffer.appendSlice(allocator, "sample text");
+                        state.cursor = 4;
+
+                        switch (mode) {
+                            .emacs => state.keymap = .emacs,
+                            .vi_normal => {
+                                state.keymap = .vi;
+                                state.vi_mode = .normal;
+                                state.pending_operator = pending;
+                            },
+                            .vi_insert => {
+                                state.keymap = .vi;
+                                state.vi_mode = .insert;
+                            },
+                        }
+
+                        const predicted = keyMayMutate(&state, ev);
+
+                        const pre = try allocator.dupe(u8, state.buffer.items);
+                        defer allocator.free(pre);
+
+                        const action = switch (state.keymap) {
+                            .emacs => keymap_emacs.handleKey(&state, ev),
+                            .vi => keymap_vi.handleKey(&state, ev),
+                        };
+                        try processAction(&state, action);
+
+                        const is_destructive = switch (action) {
+                            .insert, .insert_tab, .reverse_tab, .backspace, .delete_char, .delete_char_forward, .delete_word, .delete_word_backward, .delete_to_eol, .delete_to_bol, .yank => true,
+                            else => false,
+                        };
+                        const buffer_mutated = !std.mem.eql(u8, pre, state.buffer.items);
+
+                        // The old code pushed an undo snapshot iff is_destructive.
+                        // The new code pushes iff predicted AND is_destructive AND
+                        // buffer changed. To never lose an undo entry the old code
+                        // would have kept, predicted must be true whenever the
+                        // action is destructive. Also guard direct in-handler
+                        // mutations (e.g. vi `o`,`dd`) even though they are not in
+                        // the destructive set -- there the old code ALSO did not
+                        // snapshot, but predicting true keeps us conservative.
+                        if (is_destructive or buffer_mutated) {
+                            try std.testing.expect(predicted);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
