@@ -257,11 +257,86 @@ pub const isBalanced = parse.isBalanced;
 /// Check if input ends with a continuation operator (e.g., backslash, trailing operator).
 pub const needsContinuation = parse.needsContinuation;
 
-/// Version information
-pub const version = "0.1.0";
-pub const version_major = 0;
-pub const version_minor = 1;
-pub const version_patch = 0;
+/// Version information.
+///
+/// Single source of truth: the string is threaded in from build.zig, which
+/// parses `.version` out of build.zig.zon at configure time (see
+/// `parseZonVersion` in build.zig). `version_major/minor/patch` are derived
+/// from that same string at comptime so they can never drift from it. A
+/// test below re-parses build.zig.zon and asserts the match, so any future
+/// divergence between the manifest and this surface fails CI.
+const build_options = @import("build_options");
+pub const version = build_options.version;
+pub const version_major = parseSemverField(version, 0);
+pub const version_minor = parseSemverField(version, 1);
+pub const version_patch = parseSemverField(version, 2);
+
+/// Parse the Nth dot-separated numeric field of a semantic version string
+/// at comptime. Stops the patch field at the first `-` or `+` so
+/// pre-release / build-metadata suffixes (e.g. "1.2.3-beta.1") parse the
+/// core number. Emits a comptime error on a malformed version.
+fn parseSemverField(comptime ver: []const u8, comptime index: usize) u32 {
+    comptime {
+        var field: usize = 0;
+        var start: usize = 0;
+        var i: usize = 0;
+        while (i <= ver.len) : (i += 1) {
+            const at_end = i == ver.len;
+            const c = if (at_end) '.' else ver[i];
+            // A '-' or '+' terminates the numeric portion of the patch
+            // field (semver pre-release / build metadata).
+            const sep = c == '.' or c == '-' or c == '+';
+            if (sep or at_end) {
+                if (field == index) {
+                    const token = ver[start..i];
+                    return std.fmt.parseInt(u32, token, 10) catch
+                        @compileError("repl.version: malformed semver field in '" ++ ver ++ "'");
+                }
+                field += 1;
+                start = i + 1;
+                if (c == '-' or c == '+') break;
+            }
+        }
+        @compileError("repl.version: missing semver field in '" ++ ver ++ "'");
+    }
+}
+
+test "repl.version matches build.zig.zon .version" {
+    // Re-parse the packaging manifest at test time and assert the exported
+    // version matches. This makes manifest/version drift a CI failure.
+    // `zig build test` runs with cwd at the build root, so build.zig.zon is
+    // reachable relative to cwd. If the manifest cannot be located (e.g. a
+    // packaged consumer running this test out of tree) skip rather than
+    // misreport — the build-time parse already pins the value.
+    const cio = @import("compat.zig").defaultIo();
+    const zon = std.Io.Dir.cwd().readFileAlloc(
+        cio,
+        "build.zig.zon",
+        std.testing.allocator,
+        @enumFromInt(64 * 1024),
+    ) catch return error.SkipZigTest;
+    defer std.testing.allocator.free(zon);
+
+    const marker = ".version";
+    const marker_idx = std.mem.indexOf(u8, zon, marker) orelse return error.SkipZigTest;
+    const after = zon[marker_idx + marker.len ..];
+    const open = std.mem.indexOfScalar(u8, after, '"') orelse return error.SkipZigTest;
+    const rest = after[open + 1 ..];
+    const close = std.mem.indexOfScalar(u8, rest, '"') orelse return error.SkipZigTest;
+    const zon_version = rest[0..close];
+    try std.testing.expectEqualStrings(zon_version, version);
+}
+
+test "repl.version_major/minor/patch decompose version" {
+    const expected = std.fmt.comptimePrint("{d}.{d}.{d}", .{
+        version_major,
+        version_minor,
+        version_patch,
+    });
+    // The dotted major.minor.patch must be a prefix of `version` (allows a
+    // pre-release/build suffix while still pinning the numeric core).
+    try std.testing.expect(std.mem.startsWith(u8, version, expected));
+}
 
 test {
     // Run all module tests

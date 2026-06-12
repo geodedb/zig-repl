@@ -52,6 +52,13 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "package_name", "repl");
     build_options.addOption(bool, "with_otel", with_otel);
+    // Single source of truth for the version: parse `.version` out of
+    // build.zig.zon at configure time and expose it as `repl.version`.
+    // This keeps src/repl.zig from drifting away from build.zig.zon (the
+    // packaging manifest); a test in src/repl.zig re-parses the zon and
+    // asserts the match so future drift fails CI.
+    const version = parseZonVersion(b);
+    build_options.addOption([]const u8, "version", version);
     const build_options_mod = build_options.createModule();
 
     // Observability seam (otel). Declared as a SHARED NAMED MODULE so
@@ -282,4 +289,28 @@ pub fn build(b: *std.Build) void {
         const run_example_step = b.step(step_name, example.description);
         run_example_step.dependOn(&run_example.step);
     }
+}
+
+/// Extract the `.version = "X.Y.Z"` string from build.zig.zon so the
+/// version exposed as `repl.version` has a single source of truth. Reads
+/// the manifest at configure time; panics loudly if the field is missing
+/// (a malformed manifest is a build-author error, not a runtime concern).
+fn parseZonVersion(b: *std.Build) []const u8 {
+    const zon = b.build_root.handle.readFileAlloc(
+        b.graph.io,
+        "build.zig.zon",
+        b.allocator,
+        @enumFromInt(64 * 1024),
+    ) catch @panic("build: cannot read build.zig.zon to resolve version");
+    const marker = ".version";
+    const marker_idx = std.mem.indexOf(u8, zon, marker) orelse
+        @panic("build: no .version field in build.zig.zon");
+    const after = zon[marker_idx + marker.len ..];
+    const open = std.mem.indexOfScalar(u8, after, '"') orelse
+        @panic("build: malformed .version in build.zig.zon (no opening quote)");
+    const rest = after[open + 1 ..];
+    const close = std.mem.indexOfScalar(u8, rest, '"') orelse
+        @panic("build: malformed .version in build.zig.zon (no closing quote)");
+    // Dupe so the slice outlives the file buffer's lifetime expectations.
+    return b.allocator.dupe(u8, rest[0..close]) catch @panic("build: OOM dupe version");
 }

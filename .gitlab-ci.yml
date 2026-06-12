@@ -25,6 +25,13 @@ include:
 
 variables:
   ZIG_VERSION: "0.16.0"
+  # Digest-pinned base image (GAP-0071 / #133). Pinning to the immutable
+  # multi-arch OCI index digest instead of the floating `bookworm-slim`
+  # tag makes CI builds reproducible and tamper-evident. Resolved via
+  # `docker manifest inspect debian:bookworm-slim` (OCI image index,
+  # 15 platform manifests) on 2026-06-12. Update alongside any base-image
+  # refresh.
+  DEBIAN_IMAGE: "debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716"
   # Pinned SHA-256 hashes for Zig binary tarballs (SF-020: independent trust root).
   # These are verified from the git repository, not fetched from the download origin.
   # When updating ZIG_VERSION, update these hashes from https://ziglang.org/download/
@@ -92,7 +99,7 @@ zig-format:
 # Build job
 build:
   stage: build
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:
@@ -101,7 +108,7 @@ build:
 # Unit tests
 test:
   stage: test
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:
@@ -109,10 +116,26 @@ test:
   needs:
     - build
 
+# Observability seam tests with otel compiled in (#127, #140). Guards
+# against the seam silently regressing to a permanent no-op: under
+# -Dwith_otel=true the enabled smoke test must actually RUN (record one
+# repl.eval span) and the disabled test's `enabled == with_otel`
+# invariant must hold. The default `test` job above exercises the
+# otel-off path; this job exercises the otel-on path.
+test-with-otel:
+  stage: test
+  image: $DEBIAN_IMAGE
+  before_script:
+    - *install-zig
+  script:
+    - zig build test -Dwith_otel=true --summary all
+  needs:
+    - build
+
 # Release optimization tests
 test-release-safe:
   stage: test
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:
@@ -123,7 +146,7 @@ test-release-safe:
 # ReleaseFast tests
 test-release-fast:
   stage: test
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:
@@ -134,7 +157,7 @@ test-release-fast:
 # ReleaseSmall tests
 test-release-small:
   stage: test
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:
@@ -145,7 +168,7 @@ test-release-small:
 # Coverage-guided fuzz testing.
 fuzz:
   stage: fuzz
-  image: debian:bookworm-slim
+  image: $DEBIAN_IMAGE
   before_script:
     - *install-zig
   script:

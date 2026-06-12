@@ -32,17 +32,22 @@
 //! categories are bounded-cardinality and safe for export.
 
 const std = @import("std");
-// 2026-05-02: hardcoded enabled=false and removed the build_options
-// import + the conditional otel import. The previous pattern surfaced
-// a Zig 0.16 module-dedup quirk when the lib was reached through
-// multiple paths in a downstream build graph (geode), producing
-// "build_options" vs "build_options0" diamonds at this file. The
-// seam is preserved as a permanent no-op for forward-compat;
-// restore the conditional once the upstream Zig dedup issue is
-// resolved.
-pub const enabled: bool = false;
+const build_options = @import("build_options");
 
-const otel = struct {};
+/// Tracks `-Dwith_otel`. When false (the default) every public helper in
+/// this file collapses to a comptime-known no-op the optimizer drops; the
+/// otel dependency is never resolved. When true the helpers forward to the
+/// real `otel.api.trace` machinery wired in by `observability_init`.
+///
+/// 2026-06-12: restored `enabled = build_options.with_otel` (was hardcoded
+/// `false` on 2026-05-02 as commit 0137a67 to dodge a Zig 0.16
+/// "file exists in modules X and X0" diamond). The fix is in build.zig:
+/// `build_options` and `observability_init` are each materialised ONCE as
+/// shared named modules and imported by name into every consumer, so no
+/// duplicate anonymous module instance is created. See #127 / #140.
+pub const enabled: bool = build_options.with_otel;
+
+const otel = if (enabled) @import("otel") else struct {};
 
 /// Opaque handle for an in-flight eval cycle. When disabled, this is a
 /// zero-sized struct the optimizer drops entirely. The no-op fallback's
