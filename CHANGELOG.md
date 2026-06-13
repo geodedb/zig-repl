@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-12
+
+Audit Cycle 4: closes the residual security findings and the high-priority
+quality bugs from the 2026-06-12 full audit.
+
+### Security
+- Drop C1 control bytes (raw 0x80–0x9F and UTF-8-encoded U+0080–U+009F) in the
+  history ingest filter and render path, closing 8-bit CSI/OSC terminal-escape
+  injection from crafted history entries (GAP-0074)
+- Strip 8-bit CSI and zero-padded bracketed-paste markers in
+  `sanitizePasteContent`, closing the pastejacking residual (GAP-0075)
+- Restore terminal state if `enterRawMode` fails after entering raw mode
+  (errdefer) (#147)
+- Widen `parse.zig` bracket-depth counters to `i64` (GAP-0076)
+
+### Fixed
+- Paste and Vi direct-mutation operators (dd/dw/db/de/cc) are now undoable
+  (#146)
+- `Config.max_history` is honored via `Repl.Options.max_history` instead of
+  being silently ignored (#149)
+- `handleSearch` cancels gracefully on transient I/O errors instead of tearing
+  down the REPL (#153)
+- Restore terminal state on suspend/resume via SIGTSTP/SIGCONT handlers (#155)
+- Fix a pre-existing test that deadlocked `zig build test`'s `--listen` runner
+  by dispatching terminal-I/O actions
+
+### Changed
+- Assert and document the `cursor <= buffer.len` invariant on the public
+  `ReplState` (#151)
+- Extract a shared `killRange` helper (8 call sites) (#154)
+- Add `HistoryStore` boundary tests; doc, constant, and comment hygiene
+  (#156, #112-class items)
+
 ## [0.1.9] - 2026-06-12
 
 ### Fixed
@@ -144,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Company runners with Alpine Linux support
 - Code coverage support via CI catalog v1.6.0
 
-[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.9...HEAD
+[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.10...HEAD
+[0.1.10]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.9...v0.1.10
 [0.1.9]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.8...v0.1.9
 [0.1.8]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.7...v0.1.8
 [0.1.7]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.6...v0.1.7

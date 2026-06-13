@@ -303,16 +303,16 @@ The fixes pushed after this review was written were independently re-verified ag
 - **CI base image digest-pinned** (`cf50500`): `DEBIAN_IMAGE: "debian:bookworm-slim@sha256:96e378d7…"` (`.gitlab-ci.yml:34`). Closes #133.
 - **Version single-sourcing** (`cf50500`): `repl.zig:263-272` derives `version`/`version_major/minor/patch` from `build.zig.zon` via build options — the manifest is the single source of truth (now `0.1.9`).
 
-### Residual items still open at v0.1.9 (from this cycle's parallel deep review)
+### Residual items from this cycle's parallel deep review — ALL RESOLVED in v0.1.10
 
-These were found by the concurrent full-repo appsec pass and adversarial review this same day and are **not** fixed by the commits above:
+These were found by the concurrent full-repo appsec pass and adversarial review the same day, and were all closed in the Audit Cycle 4 fixes (v0.1.10):
 
-| Item | Severity | Location (v0.1.9) | Summary |
-|------|----------|--------------------|---------|
-| C1 control-byte bypass | Low–Medium (terminal-dependent) | `src/text_utils.zig:221-226`, `renderPrompt` content loop, search display | `isUnsafeControlChar` filters only C0+DEL; 8-bit C1 controls (0x9B CSI, 0x9D OSC, 0x9C ST, 0x90 DCS) pass all three display/ingest boundaries verbatim → escape injection on C1-honoring terminals (re-opens the SF-009/SF-013 class via the 8-bit channel) |
-| 8-bit paste-marker bypass | Low–Medium (terminal-dependent) | `src/text_utils.zig` `sanitizePasteContent` | Strips only the canonical 6-byte `ESC[200~/201~`; 8-bit `\x9b201~` and parameter-padded `ESC[0201~` variants are not stripped → pastejacking residual (the new `carryOverSplit` fixes *split canonical* markers only) |
-| `appendAssumeCapacity` invariant | Low (latent) | `src/text_utils.zig:235` | Safe only while the history filter never expands output; must be revisited if the C1 fix adopts an expanding transform (replacement glyphs) |
-| `enterRawMode` partial-failure cleanup | Low | `src/platform.zig:234-243` | `tcsetattr(raw)` + `saved_termios` + signal handlers are committed before `try writeAll("\x1b[?2004h")`; if that write fails the error returns before the caller's `defer restoreTerminalMode` registers — terminal left raw on a clean error return (CWE-460). Needs an `errdefer` restore inside `enterRawMode` |
-| `i32` bracket-depth counters | Info (theoretical) | `src/parse.zig:37-39` | Unchanged; wrap/trap requires ~2 GB single-slice input — matches the existing MF-004 disposition |
+| Item | Severity | Status | Resolution |
+|------|----------|--------|------------|
+| C1 control-byte bypass (GAP-0074, #173) | Low–Medium (terminal-dependent) | **Resolved** (`cec74ca`) | `appendHistoryFiltered` is UTF-8-aware and drops raw + UTF-8-encoded C1 (0x80–0x9F); `renderPrompt` uses `displaySpan` to render C1/invalid UTF-8 as `?` while preserving valid multi-byte UTF-8. Tests added. |
+| 8-bit paste-marker bypass (GAP-0075, #174) | Low–Medium (terminal-dependent) | **Resolved** (`cec74ca`) | `sanitizePasteContent`/`pasteMarkerLen` recognize 7-bit `ESC[`, 8-bit CSI (0x9B), and zero-padded `200~`/`201~` markers. Tests added. |
+| `appendAssumeCapacity` invariant (APPSEC-04) | Low (latent) | **Resolved** (`cec74ca`) | The C1 fix only ever drops bytes (never expands), keeping the reservation sound; a property test asserts `out.len <= in.len`, and the invariant is documented in the function. |
+| `enterRawMode` partial-failure cleanup (ADV-002, #147) | Low | **Resolved** (`edd5cb7`) | `errdefer` restores cooked termios and uninstalls signal handlers if the bracketed-paste enable write fails. |
+| `i32` bracket-depth counters (GAP-0076, #175) | Info (theoretical) | **Resolved** (`49c0aea`) | Depth counters widened to `i64`; a slice cannot exceed `usize` bytes, so the counter cannot overflow. |
 
-**Bottom line post-verification:** every finding of this review is closed or consciously dispositioned; the test suite passes (`zig build test`, 318+ tests, Debug/ReleaseSafe/ReleaseFast). The residual table above is the open security work for the next cycle.
+**Bottom line post-verification:** every finding of this review — including the parallel-cycle residuals — is closed or consciously dispositioned. `zig build test` passes (358 tests, Debug/ReleaseSafe). No open security work remains from this review.

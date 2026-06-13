@@ -5,13 +5,15 @@
 **Auditor:** Security Reviewer (automated + manual code review) + AppSec code review (defensive, evidence-first)
 **Scope:** Full source tree at commit `577adef` (Audit Cycle 3); historical findings audited at `f8eab0c`
 **Classification:** INTERNAL -- Do not distribute outside the project team
-**Revision:** 15 (Audit Cycle 3 -- 6 new appsec findings + 1 adversarial finding; 6 resolved, 1 refuted/Won't Do; 0 open findings)
+**Revision:** 16 (Audit Cycle 4 -- 4 new findings from the parallel deep review, all resolved in v0.1.10; 0 open findings)
 
 ---
 
 ## Overall Assessment
 
-**No open findings. 37 total findings tracked (SF-001..SF-030 + NEW-001..NEW-006 + ADV-001).**
+**No open findings. 41 total findings tracked (SF-001..SF-030 + NEW-001..NEW-006 + ADV-001..002 + GAP-0074..0076).**
+
+**Audit Cycle 4 (2026-06-12, v0.1.10).** The parallel full-repo appsec pass and adversarial review surfaced 4 new items beyond Revision 15, all now resolved: GAP-0074 (C1 0x80-0x9F control-byte bypass of the history/render/search filters -> terminal escape injection; fixed `cec74ca` with UTF-8-aware filtering + `displaySpan`), GAP-0075 (8-bit/zero-padded bracketed-paste markers bypassed `sanitizePasteContent` -> pastejacking; fixed `cec74ca`), ADV-002/#147 (`enterRawMode` left the terminal raw on a mid-setup write failure; fixed `edd5cb7` with `errdefer`), and GAP-0076 (theoretical `i32` bracket-depth wrap; fixed `49c0aea` with `i64`). The APPSEC-04 `appendAssumeCapacity` invariant was hardened (the C1 filter only ever shrinks output; property test added). Evidence: `docs/APPSEC_REVIEW_2026-06-12.md` §8.
 
 **Audit Cycle 3 (2026-06-12) -- see "Revision 15" section below.** Today's defensive appsec
 review (`docs/APPSEC_REVIEW_2026-06-12.md`) plus an adversarial review identified 7 new
