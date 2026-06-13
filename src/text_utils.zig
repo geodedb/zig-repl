@@ -227,34 +227,127 @@ pub fn isUnsafeControlChar(c: u8) bool {
 
 /// Append a history entry to the buffer, filtering out unsafe control characters.
 /// This prevents terminal injection from crafted history file entries (SF-009).
+///
+/// UTF-8-aware (GAP-0074 / APPSEC-02): in addition to C0 (except \t, \n) and
+/// DEL, this drops:
+///   - raw 8-bit C1 control bytes 0x80-0x9F that are not part of a valid
+///     UTF-8 sequence (8-bit CSI/OSC/DCS/ST introducers on legacy terminals),
+///   - UTF-8-encoded C1 codepoints U+0080-U+009F (0xC2 0x80..0xC2 0x9F),
+///   - any other invalid UTF-8 byte.
+/// Valid multi-byte UTF-8 sequences pass through unchanged.
+///
+/// INVARIANT: output length <= entry.len (the filter only drops bytes, never
+/// expands). The appendAssumeCapacity calls below rely on this -- do not add
+/// an expanding transform without switching to bounds-checked append and a
+/// larger reservation.
 pub fn appendHistoryFiltered(buffer: *std.ArrayList(u8), allocator: std.mem.Allocator, entry: []const u8) !void {
     // Pre-allocate to avoid log2(n) reallocs during per-byte append
     try buffer.ensureTotalCapacity(allocator, buffer.items.len + entry.len);
-    for (entry) |c| {
-        if (!isUnsafeControlChar(c)) {
-            buffer.appendAssumeCapacity(c);
+    var i: usize = 0;
+    while (i < entry.len) {
+        const c = entry[i];
+        if (c < 0x80) {
+            if (!isUnsafeControlChar(c)) {
+                buffer.appendAssumeCapacity(c);
+            }
+            i += 1;
+            continue;
         }
+        // Non-ASCII: decode one UTF-8 sequence. Invalid lead bytes (which
+        // include raw C1 0x80-0x9F and stray continuation bytes) are dropped.
+        const seq_len = std.unicode.utf8ByteSequenceLength(c) catch {
+            i += 1;
+            continue;
+        };
+        if (i + seq_len > entry.len) {
+            // Truncated sequence at end of input: drop the lead byte.
+            i += 1;
+            continue;
+        }
+        const cp = std.unicode.utf8Decode(entry[i..][0..seq_len]) catch {
+            // Invalid sequence: drop the lead byte and rescan from the next.
+            i += 1;
+            continue;
+        };
+        if (cp >= 0x80 and cp <= 0x9F) {
+            // UTF-8-encoded C1 control codepoint: drop the whole sequence.
+            i += seq_len;
+            continue;
+        }
+        buffer.appendSliceAssumeCapacity(entry[i..][0..seq_len]);
+        i += seq_len;
     }
 }
 
-/// Sanitize paste content by stripping embedded ESC[200~ and ESC[201~ sequences.
+/// Canonical 7-bit bracketed-paste markers (ESC [ 200~ / ESC [ 201~).
+pub const paste_start_marker = "\x1b[200~";
+pub const paste_end_marker = "\x1b[201~";
+
+/// Classification of the next byte sequence for terminal display.
+pub const DisplaySpan = struct {
+    /// Number of input bytes this span covers (always >= 1).
+    len: usize,
+    /// True if the bytes are a valid, non-control UTF-8 sequence safe to
+    /// write to the terminal verbatim. False for invalid UTF-8 bytes and
+    /// C1 control codepoints (U+0080-U+009F) -- render a placeholder instead.
+    safe: bool,
+};
+
+/// Classify the byte sequence starting at `bytes[0]` for display purposes
+/// (GAP-0074 / APPSEC-02). Callers must only invoke this for lead bytes
+/// >= 0x80 (ASCII is handled inline by the render loop). Never returns
+/// len == 0.
+pub fn displaySpan(bytes: []const u8) DisplaySpan {
+    const seq_len = std.unicode.utf8ByteSequenceLength(bytes[0]) catch {
+        return .{ .len = 1, .safe = false };
+    };
+    if (seq_len > bytes.len) return .{ .len = 1, .safe = false };
+    const cp = std.unicode.utf8Decode(bytes[0..seq_len]) catch {
+        return .{ .len = 1, .safe = false };
+    };
+    if (cp >= 0x80 and cp <= 0x9F) return .{ .len = seq_len, .safe = false };
+    return .{ .len = seq_len, .safe = true };
+}
+
+/// If `data[pos..]` begins a bracketed-paste marker -- 7-bit `ESC [` or 8-bit
+/// CSI (0x9B) introducer, optional leading zeros, then `200~` or `201~` --
+/// return the marker's byte length; otherwise null.
+fn pasteMarkerLen(data: []const u8, pos: usize) ?usize {
+    var i = pos;
+    // Introducer: ESC [ (2 bytes) or 8-bit CSI 0x9B (1 byte).
+    if (i + 1 < data.len and data[i] == 0x1b and data[i + 1] == '[') {
+        i += 2;
+    } else if (i < data.len and data[i] == 0x9b) {
+        i += 1;
+    } else {
+        return null;
+    }
+    // Optional leading zeros before the parameter (e.g. ESC[0200~ or
+    // ESC[00201~). The parameter itself starts with '2', so skipping zeros
+    // can never consume it.
+    while (i < data.len and data[i] == '0') : (i += 1) {}
+    // Parameter must be exactly 200 or 201, terminated by '~'.
+    if (i + 3 >= data.len) return null;
+    if (data[i] != '2' or data[i + 1] != '0') return null;
+    if (data[i + 2] != '0' and data[i + 2] != '1') return null;
+    if (data[i + 3] != '~') return null;
+    return (i + 4) - pos;
+}
+
+/// Sanitize paste content by stripping embedded bracketed-paste markers.
 /// This prevents pastejacking attacks where malicious content embeds fake
-/// bracketed paste end markers to break out of paste mode.
+/// bracketed paste start/end markers to break out of paste mode. Recognizes
+/// both the canonical 7-bit `ESC[200~`/`ESC[201~` forms and the 8-bit CSI
+/// (0x9B) and zero-padded parameter variants (GAP-0075 / APPSEC-03).
 pub fn sanitizePasteContent(data: []u8) []u8 {
-    const paste_start = "\x1b[200~";
-    const paste_end = "\x1b[201~";
     var read_pos: usize = 0;
     var write_pos: usize = 0;
 
     while (read_pos < data.len) {
-        // Check if current position starts an embedded paste sequence
-        if (read_pos + 6 <= data.len) {
-            const slice = data[read_pos .. read_pos + 6];
-            if (std.mem.eql(u8, slice, paste_start) or std.mem.eql(u8, slice, paste_end)) {
-                // Skip the embedded sequence
-                read_pos += 6;
-                continue;
-            }
+        if (pasteMarkerLen(data, read_pos)) |marker_len| {
+            // Skip the embedded sequence
+            read_pos += marker_len;
+            continue;
         }
         data[write_pos] = data[read_pos];
         write_pos += 1;
@@ -294,6 +387,97 @@ test "appendHistoryFiltered strips control characters" {
     try appendHistoryFiltered(&buffer, allocator, "hello\x07\x1b[31mworld\x7f");
     // \x07 (BEL), \x1b (ESC) filtered; '[', '3', '1', 'm' printable; \x7F (DEL) filtered
     try std.testing.expectEqualStrings("hello[31mworld", buffer.items);
+}
+
+test "appendHistoryFiltered strips raw C1 control bytes (8-bit CSI/OSC)" {
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer buffer.deinit(allocator);
+
+    // Raw (non-UTF-8) C1 bytes: 0x9B (CSI), 0x9D (OSC), 0x9C (ST), 0x90 (DCS).
+    // e.g. "\x9d0;pwned\x9c" is an 8-bit OSC title-set sequence.
+    try appendHistoryFiltered(&buffer, allocator, "a\x9d0;pwned\x9cb\x9b31mc\x90d");
+    try std.testing.expectEqualStrings("a0;pwnedb31mcd", buffer.items);
+}
+
+test "appendHistoryFiltered strips UTF-8-encoded C1 codepoints" {
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer buffer.deinit(allocator);
+
+    // U+009B encoded as UTF-8 (0xC2 0x9B) decodes to C1 CSI on UTF-8 terminals.
+    try appendHistoryFiltered(&buffer, allocator, "a\xc2\x9b31mb");
+    try std.testing.expectEqualStrings("a31mb", buffer.items);
+}
+
+test "appendHistoryFiltered preserves valid multi-byte UTF-8" {
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+    defer buffer.deinit(allocator);
+
+    // é (U+00E9, 0xC3 0xA9), 日 (U+65E5, 3 bytes), emoji (4 bytes) must survive.
+    try appendHistoryFiltered(&buffer, allocator, "caf\xc3\xa9 \xe6\x97\xa5 \xf0\x9f\x98\x80");
+    try std.testing.expectEqualStrings("caf\xc3\xa9 \xe6\x97\xa5 \xf0\x9f\x98\x80", buffer.items);
+}
+
+test "appendHistoryFiltered output never exceeds input length (invariant)" {
+    const allocator = std.testing.allocator;
+    // Property guard for the appendAssumeCapacity reservation (APPSEC-04):
+    // the filter must only ever DROP bytes, never expand.
+    const inputs = [_][]const u8{
+        "plain", "\x9b\x9c\x9d", "\xc2\x9b", "\xff\xfe", "a\x1bb", "\xc3\xa9", "",
+    };
+    for (inputs) |input| {
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 0) catch unreachable;
+        defer buffer.deinit(allocator);
+        try appendHistoryFiltered(&buffer, allocator, input);
+        try std.testing.expect(buffer.items.len <= input.len);
+    }
+}
+
+test "displaySpan classifies UTF-8 sequences and C1 bytes" {
+    // Valid 2-byte UTF-8 (é): safe, len 2.
+    {
+        const span = displaySpan("\xc3\xa9x");
+        try std.testing.expectEqual(@as(usize, 2), span.len);
+        try std.testing.expect(span.safe);
+    }
+    // UTF-8-encoded C1 (U+009B): unsafe, len 2 (skip whole sequence).
+    {
+        const span = displaySpan("\xc2\x9bx");
+        try std.testing.expectEqual(@as(usize, 2), span.len);
+        try std.testing.expect(!span.safe);
+    }
+    // Raw C1 byte (0x9B, invalid UTF-8 lead): unsafe, len 1.
+    {
+        const span = displaySpan("\x9bx");
+        try std.testing.expectEqual(@as(usize, 1), span.len);
+        try std.testing.expect(!span.safe);
+    }
+    // Truncated sequence at end: unsafe, len 1.
+    {
+        const span = displaySpan("\xc3");
+        try std.testing.expectEqual(@as(usize, 1), span.len);
+        try std.testing.expect(!span.safe);
+    }
+}
+
+test "sanitizePasteContent strips 8-bit CSI paste markers" {
+    const allocator = std.testing.allocator;
+    const input = "safe\x9b201~rm -rf ~\x9b200~after";
+    const buf = try allocator.dupe(u8, input);
+    defer allocator.free(buf);
+    const result = sanitizePasteContent(buf);
+    try std.testing.expectEqualStrings("saferm -rf ~after", result);
+}
+
+test "sanitizePasteContent strips zero-padded paste markers" {
+    const allocator = std.testing.allocator;
+    const input = "a\x1b[0200~b\x1b[00201~c";
+    const buf = try allocator.dupe(u8, input);
+    defer allocator.free(buf);
+    const result = sanitizePasteContent(buf);
+    try std.testing.expectEqualStrings("abc", result);
 }
 
 test "sanitizePasteContent strips embedded paste sequences" {

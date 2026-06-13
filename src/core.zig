@@ -354,21 +354,41 @@ fn renderPrompt(state: *ReplState) !void {
     };
 
     // Write buffer contents, sanitizing control characters for display.
+    // ASCII control chars and DEL render as '?'. Bytes >= 0x80 are decoded
+    // as UTF-8: valid non-C1 sequences pass through; raw C1 bytes (0x9B CSI,
+    // 0x9D OSC, ...), UTF-8-encoded C1 codepoints, and invalid bytes render
+    // as '?' so attacker-controlled buffer content cannot emit 8-bit terminal
+    // controls (GAP-0074). Substitution never expands output, so the render
+    // buffer reservation is unaffected.
     // If the render buffer fills, stop immediately to avoid broken ANSI sequences.
-    if (!buffer_full) for (state.buffer.items) |c| {
-        const write_result = if (c == '\n')
-            w.writeAll("\r\n")
-        else if (c == '\t' or (c >= 0x20 and c != 0x7F))
-            w.writeAll(&[_]u8{c})
-        else
-            // Control characters and DEL - show visual indicator
-            w.writeAll("?");
+    if (!buffer_full) {
+        var idx: usize = 0;
+        while (idx < state.buffer.items.len) {
+            const c = state.buffer.items[idx];
+            var advance: usize = 1;
+            const write_result = if (c == '\n')
+                w.writeAll("\r\n")
+            else if (c == '\t' or (c >= 0x20 and c < 0x7F))
+                w.writeAll(&[_]u8{c})
+            else if (c < 0x20 or c == 0x7F)
+                // Control characters and DEL - show visual indicator
+                w.writeAll("?")
+            else blk: {
+                const span = text_utils.displaySpan(state.buffer.items[idx..]);
+                advance = span.len;
+                break :blk if (span.safe)
+                    w.writeAll(state.buffer.items[idx..][0..span.len])
+                else
+                    w.writeAll("?");
+            };
 
-        write_result catch {
-            buffer_full = true;
-            break;
-        };
-    };
+            write_result catch {
+                buffer_full = true;
+                break;
+            };
+            idx += advance;
+        }
+    }
 
     // Single-pass calculation of visual lines and cursor position (PF-009).
     const render_info = render.calculateRenderInfo(prompt.len, state.buffer.items, state.cursor, term_width);
@@ -2381,6 +2401,18 @@ test "keyMayMutate: never under-predicts a mutating key (exhaustive)" {
                             .emacs => keymap_emacs.handleKey(&state, ev),
                             .vi => keymap_vi.handleKey(&state, ev),
                         };
+                        // Skip actions whose handlers perform real terminal I/O
+                        // (read stdin / write stdout). They are non-edit actions,
+                        // orthogonal to keyMayMutate's buffer-mutation contract,
+                        // and dispatching them corrupts Zig's `zig build test`
+                        // --listen IPC channel (fd 0/1): `.search` blocks reading
+                        // the command pipe, the others inject bytes into the
+                        // result pipe. The editing actions below still exercise
+                        // the prediction fully.
+                        switch (action) {
+                            .search, .clear_screen, .complete, .run => continue,
+                            else => {},
+                        }
                         try processAction(&state, action);
 
                         const is_destructive = switch (action) {
