@@ -7,7 +7,10 @@
 //!
 //! ## Features
 //!
-//! - **Raw terminal mode** with proper cleanup on exit/signals
+//! - **Raw terminal mode** with cleanup on normal exit, on SIGTERM/SIGHUP, and
+//!   on suspend/resume (SIGTSTP/SIGCONT). In raw mode Ctrl-C and Ctrl-Z are
+//!   delivered as bytes (ISIG is disabled), not signals; SIGKILL cannot be
+//!   handled.
 //! - **Emacs and Vi keybindings** - switch modes at runtime
 //! - **Persistent command history** - saved to disk, searchable
 //! - **Tab completion** - extensible completion system

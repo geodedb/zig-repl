@@ -101,11 +101,14 @@ pub fn getenv(name: [*:0]const u8) ?[]const u8 {
     }
 }
 
+/// Maximum environment-variable name length (excludes the NUL terminator).
+const max_env_name_len = 255;
+
 /// Get environment variable by Zig slice name.
 /// Converts to null-terminated string using a static buffer.
 pub fn getenvSlice(name: []const u8) ?[]const u8 {
-    if (name.len >= 255) return null;
-    var buf: [256]u8 = undefined;
+    if (name.len >= max_env_name_len) return null;
+    var buf: [max_env_name_len + 1]u8 = undefined;
     @memcpy(buf[0..name.len], name);
     buf[name.len] = 0;
     const name_z: [*:0]const u8 = buf[0..name.len :0];

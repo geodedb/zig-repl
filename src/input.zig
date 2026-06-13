@@ -27,10 +27,14 @@ pub const KeyEvent = struct {
 /// to `{ .key = byte + 'a' - 1, .ctrl = true }`, producing a *different*
 /// KeyEvent. Therefore these codes cannot collide with Ctrl+letter combos.
 pub const SyntheticKey = struct {
-    pub const insert = 0x02; // ESC[2~ → Insert
-    pub const delete = 0x04; // ESC[3~ → Delete (forward delete)
-    pub const page_up = 0x05; // ESC[5~ → Page Up
-    pub const page_down = 0x06; // ESC[6~ → Page Down
+    /// ESC[2~ → Insert (synthetic, collision-free code point).
+    pub const insert = 0x02;
+    /// ESC[3~ → Delete / forward delete.
+    pub const delete = 0x04;
+    /// ESC[5~ → Page Up.
+    pub const page_up = 0x05;
+    /// ESC[6~ → Page Down.
+    pub const page_down = 0x06;
 };
 
 /// Parse a raw terminal byte sequence into a KeyEvent.

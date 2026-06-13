@@ -12,7 +12,7 @@ A cross-platform, feature-rich REPL (Read-Eval-Print Loop) library for Zig.
 
 ## Features
 
-- **Raw terminal mode** with proper cleanup on exit/signals
+- **Raw terminal mode** with cleanup on normal exit, on SIGTERM/SIGHUP, and on suspend/resume (SIGTSTP/SIGCONT)
 - **Emacs and Vi keybindings** - switch modes at runtime
 - **Persistent command history** - saved to disk, searchable
 - **Tab completion** - extensible completion system

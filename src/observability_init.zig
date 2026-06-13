@@ -96,6 +96,8 @@ pub const Otel = struct {
     pub fn deinit(self: *@This()) void {
         observability.global.tracer = null;
         observability.global.meter = null;
+        // Best-effort flush on shutdown: a failed flush is unreportable here
+        // (deinit path) and telemetry is optional by design, so it is discarded.
         self.tracer_provider.forceFlush(2_000) catch {};
         self.meter_provider.forceFlush(2_000) catch {};
         self.logger_provider.forceFlush(2_000) catch {};

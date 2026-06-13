@@ -41,6 +41,68 @@ var terminal_resized: bool = true; // true initially to force first fetch
 /// Async-signal-safety: only uses raw syscalls via `std.posix.system`
 /// (which resolves to `std.os.linux` or `std.c` depending on the
 /// target) and does not allocate or acquire locks.
+/// Build the raw-mode termios from a saved cooked-mode `original`.
+/// Pure struct manipulation (no syscalls/allocation/locks), so it is safe to
+/// call from an async signal handler (see `handleContSignal`).
+fn makeRawTermios(original: std.posix.termios) std.posix.termios {
+    var raw = original;
+    raw.iflag.ICRNL = false; // Don't translate CR to NL
+    raw.iflag.IXON = false; // Disable XON/XOFF flow control
+    raw.oflag.OPOST = false; // Disable output processing
+    raw.lflag.ECHO = false; // Disable echo
+    raw.lflag.ICANON = false; // Disable canonical mode
+    raw.lflag.ISIG = false; // Disable signal generation
+    raw.lflag.IEXTEN = false; // Disable extended input processing
+    raw.cc[@intFromEnum(std.posix.V.MIN)] = 1; // Minimum bytes to read
+    raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1s escape-sequence timeout
+    return raw;
+}
+
+/// SIGTSTP handler (#155): on an external `kill -TSTP` (the keyboard Ctrl-Z
+/// does not reach us in raw mode, since ISIG is disabled) restore the cooked
+/// terminal so the user's shell is usable while suspended, then re-raise
+/// SIGTSTP with the default disposition to actually stop. On resume,
+/// `handleContSignal` re-applies raw mode.
+///
+/// Async-signal-safety: only raw syscalls via `std.posix.system`, no alloc/lock.
+fn handleSuspendSignal(sig: std.posix.SIG) callconv(.c) void {
+    if (builtin.os.tag == .windows) return;
+    const sys = std.posix.system;
+
+    if (saved_termios) |original| {
+        _ = sys.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &original);
+    }
+    const disable_bracketed_paste = "\x1b[?2004l";
+    _ = sys.write(std.posix.STDOUT_FILENO, disable_bracketed_paste, disable_bracketed_paste.len);
+
+    // Re-raise with the default disposition so the process actually stops.
+    const default_sa = std.posix.Sigaction{
+        .handler = .{ .handler = std.posix.SIG.DFL },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(sig, &default_sa, null);
+    _ = sys.kill(sys.getpid(), sig);
+}
+
+/// SIGCONT handler (#155): on resume after a suspend, re-enter raw mode and
+/// re-arm the SIGTSTP handler. The screen is not redrawn from the handler
+/// (not async-safe); the next keystroke triggers a normal render.
+///
+/// Async-signal-safety: only raw syscalls and pure struct manipulation.
+fn handleContSignal(_: std.posix.SIG) callconv(.c) void {
+    if (builtin.os.tag == .windows) return;
+    const sys = std.posix.system;
+
+    if (saved_termios) |original| {
+        const raw = makeRawTermios(original);
+        _ = sys.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, &raw);
+        const enable_bracketed_paste = "\x1b[?2004h";
+        _ = sys.write(std.posix.STDOUT_FILENO, enable_bracketed_paste, enable_bracketed_paste.len);
+        installSuspendHandlers();
+    }
+}
+
 fn handleTerminalSignal(sig: std.posix.SIG) callconv(.c) void {
     if (builtin.os.tag == .windows) return;
 
@@ -88,6 +150,10 @@ fn installTerminalSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.TERM, &sa, null);
     std.posix.sigaction(std.posix.SIG.HUP, &sa, null);
 
+    // Suspend/resume handlers (#155): persistent (not one-shot) so repeated
+    // suspend/resume cycles keep working.
+    installSuspendHandlers();
+
     // SIGWINCH handler for terminal resize detection (PF-040).
     // Not one-shot — must persist to detect repeated resizes.
     const winch_sa = std.posix.Sigaction{
@@ -96,6 +162,26 @@ fn installTerminalSignalHandlers() void {
         .flags = 0,
     };
     std.posix.sigaction(std.posix.SIG.WINCH, &winch_sa, null);
+}
+
+/// Install the SIGTSTP (suspend) and SIGCONT (resume) handlers. Persistent
+/// (not one-shot) and re-armed by `handleContSignal` after each resume (#155).
+fn installSuspendHandlers() void {
+    if (builtin.os.tag == .windows) return;
+
+    const tstp_sa = std.posix.Sigaction{
+        .handler = .{ .handler = handleSuspendSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.TSTP, &tstp_sa, null);
+
+    const cont_sa = std.posix.Sigaction{
+        .handler = .{ .handler = handleContSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.CONT, &cont_sa, null);
 }
 
 /// Remove the terminal signal handlers (restore default behavior).
@@ -112,6 +198,8 @@ fn removeTerminalSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.TERM, &default_sa, null);
     std.posix.sigaction(std.posix.SIG.HUP, &default_sa, null);
     std.posix.sigaction(std.posix.SIG.WINCH, &default_sa, null);
+    std.posix.sigaction(std.posix.SIG.TSTP, &default_sa, null);
+    std.posix.sigaction(std.posix.SIG.CONT, &default_sa, null);
 }
 
 /// Get a handle to standard input.
@@ -221,16 +309,7 @@ pub fn enterRawMode() !TerminalState {
     const stdin = getStdinHandle();
     const original = try std.posix.tcgetattr(stdin.handle);
 
-    var raw = original;
-    raw.iflag.ICRNL = false; // Don't translate CR to NL
-    raw.iflag.IXON = false; // Disable XON/XOFF flow control
-    raw.oflag.OPOST = false; // Disable output processing
-    raw.lflag.ECHO = false; // Disable echo
-    raw.lflag.ICANON = false; // Disable canonical mode
-    raw.lflag.ISIG = false; // Disable signal generation
-    raw.lflag.IEXTEN = false; // Disable extended input processing
-    raw.cc[@intFromEnum(std.posix.V.MIN)] = 1; // Minimum bytes to read
-    raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout for escape sequences
+    const raw = makeRawTermios(original);
 
     try std.posix.tcsetattr(stdin.handle, .FLUSH, raw);
     // ADV-002 (#147): if anything after this point fails, restore cooked mode
