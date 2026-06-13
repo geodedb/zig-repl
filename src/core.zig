@@ -272,7 +272,9 @@ pub const Repl = struct {
             try processInput(&state);
         }
 
-        // Final newline
+        // Final newline. Best-effort: stdout may already be broken (e.g. the
+        // pipe was closed) during exit, and there is nothing useful to do with
+        // a failure on the very last write (QF-107).
         const stdout = platform.getStdoutHandle();
         compat.writeAll(stdout, "\r\n") catch {};
     }
@@ -644,10 +646,8 @@ fn carryOverSplit(data: []const u8, paste_state: *PasteState, in_paste: bool) us
 /// True if `s` (length 1..5) is a proper prefix of `\x1b[200~` or `\x1b[201~`.
 fn isMarkerPrefix(s: []const u8) bool {
     if (s.len == 0 or s.len >= 6) return false;
-    const start_marker = "\x1b[200~";
-    const end_marker = "\x1b[201~";
-    return std.mem.eql(u8, s, start_marker[0..s.len]) or
-        std.mem.eql(u8, s, end_marker[0..s.len]);
+    return std.mem.eql(u8, s, text_utils.paste_start_marker[0..s.len]) or
+        std.mem.eql(u8, s, text_utils.paste_end_marker[0..s.len]);
 }
 
 /// Cheap pre-handler prediction of whether a key event can mutate the edit
@@ -772,7 +772,7 @@ fn consumeBracketedPaste(
     last_action: *KeyAction,
 ) bool {
     // Check for paste start: ESC[200~
-    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], "\x1b[200~")) {
+    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], text_utils.paste_start_marker)) {
         state.in_bracketed_paste = true;
         state.paste_strip_leading = true;
         paste_len.* = 0;
@@ -780,7 +780,7 @@ fn consumeBracketedPaste(
         return true;
     }
     // Check for paste end: ESC[201~
-    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], "\x1b[201~")) {
+    if (i.* + 5 < buf.len and std.mem.eql(u8, buf[i.*..][0..6], text_utils.paste_end_marker)) {
         state.in_bracketed_paste = false;
         state.paste_strip_leading = false;
         if (paste_len.* > 0) {
