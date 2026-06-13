@@ -34,9 +34,12 @@ pub fn isComplete(input: []const u8) bool {
 
 /// Check if all brackets and quotes are balanced.
 pub fn isBalanced(input: []const u8) bool {
-    var paren_depth: i32 = 0;
-    var bracket_depth: i32 = 0;
-    var brace_depth: i32 = 0;
+    // i64: a slice can hold at most usize bytes, so a per-byte depth counter
+    // can never overflow i64 -- removes the theoretical i32 wrap (ReleaseFast)
+    // / trap (ReleaseSafe) on ~2GB of consecutive brackets (APPSEC-07 / GAP-0076).
+    var paren_depth: i64 = 0;
+    var bracket_depth: i64 = 0;
+    var brace_depth: i64 = 0;
     var in_string = false;
     var in_single_string = false;
     var in_line_comment = false;
