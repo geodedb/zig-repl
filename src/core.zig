@@ -946,6 +946,22 @@ fn handleCancellation(state: *ReplState) !void {
 const parseKeyEvent = input_mod.parseKeyEvent;
 const getKeyEventLength = input_mod.getKeyEventLength;
 
+/// Kill (cut) `buffer[start..end)`: replace the kill ring's contents with the
+/// range, delete it from the buffer, and mark `last_was_kill`. No-op when
+/// `start >= end`. `state` is `anytype` so the keymap modules can pass their
+/// duck-typed test states (same contract as handleKey).
+///
+/// Kill-ring alloc failures are non-critical: the delete still proceeds and
+/// only yank-back loses data. Shrinking replaceRange with an empty replacement
+/// cannot allocate (QF-098 / #154).
+pub fn killRange(state: anytype, start: usize, end: usize) void {
+    if (start >= end) return;
+    state.kill_ring.clearRetainingCapacity();
+    state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..end]) catch {};
+    state.buffer.replaceRange(state.allocator, start, end - start, &.{}) catch unreachable;
+    state.last_was_kill = true;
+}
+
 fn processAction(state: *ReplState, action: KeyAction) !void {
     // QF-095 (#151): the slicing paths below (delete_to_eol/bol, word ops)
     // rely on this invariant; fail fast in safe builds if an external caller
@@ -983,42 +999,25 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
             }
         },
         .delete_word => {
-            const end = findWordEnd(state.buffer.items, state.cursor);
-            if (end > state.cursor) {
-                state.kill_ring.clearRetainingCapacity();
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                state.last_was_kill = true;
-                // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
-                // Shrinking replaceRange with empty replacement cannot allocate.
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
-            }
+            killRange(state, state.cursor, findWordEnd(state.buffer.items, state.cursor));
         },
         .delete_word_backward => {
             const start = findWordStart(state.buffer.items, state.cursor);
-            if (state.cursor > start) {
-                const count = state.cursor - start;
-                state.kill_ring.clearRetainingCapacity();
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
-                // Single O(n) replaceRange instead of O(n*w) orderedRemove loop
-                // Shrinking replaceRange with empty replacement cannot allocate.
-                state.buffer.replaceRange(state.allocator, start, count, &.{}) catch unreachable;
-                state.cursor = start;
-            }
+            killRange(state, start, state.cursor);
+            state.cursor = start;
+            // Parity with prior behavior: the kill flag is set even for an
+            // already-at-start no-op so a following kill coalesces.
             state.last_was_kill = true;
         },
         .delete_to_eol => {
-            state.kill_ring.clearRetainingCapacity();
-            state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..]) catch {};
-            state.buffer.shrinkRetainingCapacity(state.cursor);
+            killRange(state, state.cursor, state.buffer.items.len);
+            // Parity: flag set even when the cursor is already at EOL.
             state.last_was_kill = true;
         },
         .delete_to_bol => {
-            state.kill_ring.clearRetainingCapacity();
-            state.kill_ring.appendSlice(state.allocator, state.buffer.items[0..state.cursor]) catch {};
-            // Single O(n) replaceRange instead of alloc+copy+clear+append cycle
-            // Shrinking replaceRange with empty replacement cannot allocate.
-            state.buffer.replaceRange(state.allocator, 0, state.cursor, &.{}) catch unreachable;
+            killRange(state, 0, state.cursor);
             state.cursor = 0;
+            // Parity: flag set even when the cursor is already at BOL.
             state.last_was_kill = true;
         },
         .move_left => {

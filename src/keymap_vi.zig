@@ -224,47 +224,32 @@ fn handlePendingOperator(state: anytype, key: core.KeyEvent) ?core.KeyAction {
     if (op == 'd') {
         switch (key.key) {
             'd' => {
-                // dd: delete line
-                // Kill ring alloc failures are non-critical: delete still works, yank-back won't have data
-                state.kill_ring.clearRetainingCapacity();
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items) catch {};
-                state.buffer.clearRetainingCapacity();
+                // dd: delete line (QF-098: shared killRange helper)
+                core.killRange(state, 0, state.buffer.items.len);
                 state.cursor = 0;
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;
             },
             'w' => {
-                // dw: delete word — single O(n) replaceRange instead of O(n*w) orderedRemove loop
-                const end = findWordEnd(state.buffer.items, state.cursor);
-                state.kill_ring.clearRetainingCapacity();
-                // Kill ring alloc failures are non-critical: delete still works, yank-back won't have data
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                // Shrinking replaceRange with empty replacement cannot allocate.
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
+                // dw: delete word
+                core.killRange(state, state.cursor, findWordEnd(state.buffer.items, state.cursor));
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;
             },
             'b' => {
-                // db: delete word backward — single O(n) replaceRange
+                // db: delete word backward
                 const start = findWordStart(state.buffer.items, state.cursor);
-                state.kill_ring.clearRetainingCapacity();
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items[start..state.cursor]) catch {};
-                // Shrinking replaceRange with empty replacement cannot allocate.
-                state.buffer.replaceRange(state.allocator, start, state.cursor - start, &.{}) catch unreachable;
+                core.killRange(state, start, state.cursor);
                 state.cursor = start;
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;
             },
             'e' => {
-                // de: delete to end of word — single O(n) replaceRange
-                const end = findEndOfWord(state.buffer.items, state.cursor);
-                state.kill_ring.clearRetainingCapacity();
-                state.kill_ring.appendSlice(state.allocator, state.buffer.items[state.cursor..end]) catch {};
-                // Shrinking replaceRange with empty replacement cannot allocate.
-                state.buffer.replaceRange(state.allocator, state.cursor, end - state.cursor, &.{}) catch unreachable;
+                // de: delete to end of word
+                core.killRange(state, state.cursor, findEndOfWord(state.buffer.items, state.cursor));
                 state.last_was_kill = true;
                 state.pending_operator = null;
                 return .none;

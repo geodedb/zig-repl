@@ -26,7 +26,8 @@
 //! file support should:
 //!
 //! 1. Load a `Config` via `Config.loadFromFile()` or `Config.loadDefault()`
-//! 2. Map relevant fields to `Repl.Options` (e.g., `config.keymap` -> `options.keymap`)
+//! 2. Map relevant fields to `Repl.Options` (e.g., `config.keymap` -> `options.keymap`,
+//!    `config.max_history` -> `options.max_history`)
 //! 3. Pass the `Options` to `Repl.run()`
 
 const std = @import("std");

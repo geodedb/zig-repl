@@ -91,6 +91,7 @@ The `Repl.run()` function accepts a configuration struct with these options:
 | `history_enabled` | `bool` | `true` | Enable command history |
 | `app_name` | `[]const u8` | `"repl"` | Application name (used for default history file path) |
 | `history_path` | `?[]const u8` | `null` | Custom history file path (overrides default) |
+| `max_history` | `usize` | `5000` | Maximum history entries kept in memory and persisted |
 | `run_fn` | `?RunFn` | `null` | Command handler callback (see Quick Start) |
 | `is_complete_fn` | `?IsCompleteFn` | `null` | Multi-line input detection |
 | `complete_fn` | `?CompleteFn` | `null` | Tab completion callback |

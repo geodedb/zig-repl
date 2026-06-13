@@ -748,4 +748,64 @@ test "history persistent handle: no handle opened without path" {
     try std.testing.expectEqual(@as(usize, 1), hist.entries.items.len);
 }
 
+// QF-100 (#156): boundary coverage for the public HistoryStore API.
+
+test "QF-100: get returns null for out-of-range index" {
+    const allocator = std.testing.allocator;
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("one");
+    try std.testing.expect(hist.get(0) != null);
+    try std.testing.expect(hist.get(1) == null);
+    try std.testing.expect(hist.get(9999) == null);
+    try std.testing.expectEqual(@as(usize, 1), hist.count());
+}
+
+test "QF-100: searchBackward empty pattern matches most recent entry" {
+    const allocator = std.testing.allocator;
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("alpha");
+    try hist.append("beta");
+    // indexOf(_, "") returns 0, so an empty pattern matches any entry; the
+    // backward scan returns the most recent (highest index).
+    const result = hist.searchBackward("", null);
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("beta", result.?.entry);
+    try std.testing.expectEqual(@as(usize, 1), result.?.index);
+}
+
+test "QF-100: searchBackward start_index boundaries" {
+    const allocator = std.testing.allocator;
+    var hist = try HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    try hist.append("match one"); // index 0
+    try hist.append("other"); // index 1
+    try hist.append("match two"); // index 2
+
+    // Default start: most recent match.
+    const recent = hist.searchBackward("match", null);
+    try std.testing.expect(recent != null);
+    try std.testing.expectEqualStrings("match two", recent.?.entry);
+
+    // start_index is the exclusive upper bound of the backward scan, so
+    // start_index == 1 scans only index 0.
+    const from_one = hist.searchBackward("match", 1);
+    try std.testing.expect(from_one != null);
+    try std.testing.expectEqualStrings("match one", from_one.?.entry);
+    try std.testing.expectEqual(@as(usize, 0), from_one.?.index);
+
+    // start_index == 0 scans nothing.
+    try std.testing.expect(hist.searchBackward("match", 0) == null);
+
+    // No match anywhere.
+    try std.testing.expect(hist.searchBackward("absent", null) == null);
+
+    // Empty store.
+    var empty = try HistoryStore.init(allocator, null, true);
+    defer empty.deinit();
+    try std.testing.expect(empty.searchBackward("x", null) == null);
+    try std.testing.expectEqual(@as(usize, 0), empty.count());
+}
+
 // isPathSafe tests are in text_utils.zig (canonical location)
