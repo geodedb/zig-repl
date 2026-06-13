@@ -19,9 +19,18 @@ const appendHistoryFiltered = text_utils.appendHistoryFiltered;
 /// Run the interactive reverse-incremental search loop.
 /// Reads from stdin, searching history as the user types. Exits on
 /// ESC / Enter / Ctrl-C. On Ctrl-C the edit buffer is cleared.
-pub fn handleSearch(state: *core.ReplState) !void {
+/// Run the Ctrl-R reverse-incremental-search loop.
+///
+/// QF-097 (#153): transient I/O or allocation failures inside the loop cancel
+/// the search and return to the prompt rather than tearing down the whole REPL
+/// (renderPrompt already tolerates BrokenPipe the same way). The function
+/// therefore never propagates an error.
+pub fn handleSearch(state: *core.ReplState) void {
     const stdout = platform.getStdoutHandle();
-    try compat.writeAll(stdout, "\r\n(reverse-i-search)`': ");
+    compat.writeAll(stdout, "\r\n(reverse-i-search)`': ") catch {
+        state.searching = false;
+        return;
+    };
 
     state.search_buffer.clearRetainingCapacity();
 
@@ -29,7 +38,10 @@ pub fn handleSearch(state: *core.ReplState) !void {
     var search_buf: [256]u8 = undefined;
 
     outer: while (true) {
-        const n = try compat.read(stdin, &search_buf);
+        const n = compat.read(stdin, &search_buf) catch {
+            state.searching = false;
+            break :outer;
+        };
         if (n == 0) continue;
 
         // QF-082: Use index-based loop with getKeyEventLength to handle
@@ -72,7 +84,10 @@ pub fn handleSearch(state: *core.ReplState) !void {
                     _ = state.search_buffer.pop();
                 }
             } else if (c >= 0x20 and c < 0x7f) {
-                try state.search_buffer.append(state.allocator, c);
+                state.search_buffer.append(state.allocator, c) catch {
+                    state.searching = false;
+                    break :outer;
+                };
             }
 
             i += 1;
@@ -82,7 +97,10 @@ pub fn handleSearch(state: *core.ReplState) !void {
         var found = false;
         if (state.history.searchBackward(state.search_buffer.items, state.history_index)) |result| {
             state.buffer.clearRetainingCapacity();
-            try appendHistoryFiltered(&state.buffer, state.allocator, result.entry);
+            appendHistoryFiltered(&state.buffer, state.allocator, result.entry) catch {
+                state.searching = false;
+                break :outer;
+            };
             state.cursor = state.buffer.items.len;
             state.history_index = result.index;
             found = true;
@@ -100,7 +118,10 @@ pub fn handleSearch(state: *core.ReplState) !void {
         // contain raw \n which would move the cursor without a \r, causing
         // misaligned output. We modify only the display buffer, not state.buffer.
         const display_line = replaceNewlinesForDisplay(search_line);
-        try compat.writeAll(stdout, display_line);
+        compat.writeAll(stdout, display_line) catch {
+            state.searching = false;
+            break :outer;
+        };
     }
 }
 
@@ -123,6 +144,14 @@ fn replaceNewlinesForDisplay(buf: []u8) []u8 {
 // =============================================================================
 // Tests
 // =============================================================================
+
+test "QF-097: handleSearch does not propagate I/O errors" {
+    // Compile-time contract: handleSearch must never return an error union, so
+    // a transient read/write/alloc failure cancels the search instead of
+    // tearing down Repl.run().
+    const info = @typeInfo(@TypeOf(handleSearch)).@"fn";
+    try std.testing.expect(@typeInfo(info.return_type.?) != .error_union);
+}
 
 test "replaceNewlinesForDisplay replaces newlines with spaces" {
     var buf = "hello\nworld".*;

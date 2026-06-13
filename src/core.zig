@@ -182,6 +182,10 @@ pub const Repl = struct {
         app_name: []const u8 = "repl",
         /// Custom history file path (optional)
         history_path: ?[]const u8 = null,
+        /// Maximum number of history entries kept in memory and persisted.
+        /// Consumers using `Config` should map `Config.max_history` here
+        /// (QF-093); the default matches `HistoryStore`'s built-in cap.
+        max_history: usize = 5000,
         /// Command handler function
         run_fn: ?RunFn = null,
         /// Statement completion checker (for multi-line input)
@@ -226,6 +230,9 @@ pub const Repl = struct {
 
         var hist = try history_mod.HistoryStore.init(opts.allocator, hist_path, opts.history_enabled);
         defer hist.deinit();
+        // QF-093 (#149): honor the configured cap (previously the field was
+        // collected by Config but never wired through to the store).
+        hist.max_entries = opts.max_history;
 
         if (opts.history_enabled) {
             try hist.load();
@@ -275,6 +282,11 @@ pub const Repl = struct {
 pub const ReplState = struct {
     allocator: std.mem.Allocator,
     buffer: std.ArrayList(u8),
+    /// Byte offset of the cursor within `buffer`.
+    /// INVARIANT: `cursor <= buffer.items.len` at every public API boundary.
+    /// All editing paths maintain it; external callers that mutate `buffer`
+    /// or `cursor` directly (ReplState is exposed for advanced use) must
+    /// re-establish it or processAction will assert (QF-095 / #151).
     cursor: usize,
     history: *history_mod.HistoryStore,
     history_index: ?usize,
@@ -563,12 +575,6 @@ fn processReadBuffer(
             .vi => keymap_vi.handleKey(state, key_event),
         };
 
-        // Determine if this action modifies buffer content.
-        const is_destructive = switch (action) {
-            .insert, .insert_tab, .reverse_tab, .backspace, .delete_char, .delete_char_forward, .delete_word, .delete_word_backward, .delete_to_eol, .delete_to_bol, .yank => true,
-            else => false,
-        };
-
         processAction(state, action) catch {
             if (pre_buffer) |buf_snap| state.allocator.free(buf_snap);
             break;
@@ -576,10 +582,14 @@ fn processReadBuffer(
         last_action.* = action;
 
         if (pre_buffer) |buf_snap| {
-            // Keep the snapshot only if the action was destructive AND the
-            // buffer actually changed (perf NEW-2: skip dead undo entries for
-            // no-op edits such as backspace-at-BOL or delete-at-EOL).
-            const changed = is_destructive and !std.mem.eql(u8, buf_snap, state.buffer.items);
+            // Keep the snapshot whenever the buffer ACTUALLY changed -- not
+            // only for the delete/insert-class action set. Vi operators
+            // (dd/dw/db/de/cc) mutate the buffer inside handleKey and return
+            // .none, so an action-class check misses them and silently drops
+            // their undo entry (QF-091 / #146). Comparing the pre-state against
+            // the final buffer is authoritative for every mutation path and
+            // still skips dead entries for no-op edits (perf NEW-2).
+            const changed = !std.mem.eql(u8, buf_snap, state.buffer.items);
             if (changed) {
                 // pushOwned takes ownership; no extra free needed.
                 state.undo_stack.pushOwned(buf_snap, pre_cursor) catch {
@@ -813,10 +823,26 @@ fn flushPasteBuffer(
 ) void {
     const data = paste_buf[0..paste_len.*];
     const sanitized = sanitizePasteContent(data);
-    state.buffer.insertSlice(state.allocator, state.cursor, sanitized) catch return;
-    state.cursor += sanitized.len;
-    state.content_changed = true;
-    last_action.* = .insert;
+    if (sanitized.len > 0) {
+        // QF-091 (#146): snapshot the pre-paste buffer so a paste is undoable.
+        // Pastes larger than PASTE_BUF_SIZE flush in chunks; each flushed chunk
+        // becomes one undo step. Snapshot alloc failure degrades to a
+        // non-undoable paste (matching the keystroke path's catch-null policy).
+        const pre_buffer: ?[]u8 = state.allocator.dupe(u8, state.buffer.items) catch null;
+        const pre_cursor = state.cursor;
+        state.buffer.insertSlice(state.allocator, state.cursor, sanitized) catch {
+            if (pre_buffer) |p| state.allocator.free(p);
+            return;
+        };
+        if (pre_buffer) |p| {
+            state.undo_stack.pushOwned(p, pre_cursor) catch {
+                state.allocator.free(p);
+            };
+        }
+        state.cursor += sanitized.len;
+        state.content_changed = true;
+        last_action.* = .insert;
+    }
     paste_len.* = 0;
 }
 
@@ -921,6 +947,10 @@ const parseKeyEvent = input_mod.parseKeyEvent;
 const getKeyEventLength = input_mod.getKeyEventLength;
 
 fn processAction(state: *ReplState, action: KeyAction) !void {
+    // QF-095 (#151): the slicing paths below (delete_to_eol/bol, word ops)
+    // rely on this invariant; fail fast in safe builds if an external caller
+    // broke it by mutating ReplState directly.
+    std.debug.assert(state.cursor <= state.buffer.items.len);
     const content_modifying = switch (action) {
         .move_left, .move_right, .move_word_left, .move_word_right, .move_bol, .move_eol, .none, .history_prev, .history_next, .history_first, .history_last, .clear_screen => false,
         else => true,
@@ -1056,7 +1086,7 @@ fn processAction(state: *ReplState, action: KeyAction) !void {
         },
         .search => {
             state.searching = true;
-            try handleSearch(state);
+            handleSearch(state);
         },
         .complete => handleCompletion(state),
         .run, .cancel, .quit => {},
@@ -2302,6 +2332,76 @@ test "perf NEW-2: no-op backspace at BOL does not push a dead undo entry" {
     // Buffer unchanged AND no dead undo entry recorded (perf NEW-2).
     try std.testing.expectEqualStrings("abc", state.buffer.items);
     try std.testing.expectEqual(@as(usize, 0), state.undo_stack.len());
+}
+
+test "QF-093: Options.max_history caps HistoryStore entries" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, true);
+    defer hist.deinit();
+    const opts = Repl.Options{ .allocator = allocator, .max_history = 42 };
+    // Mirrors the wiring in Repl.run().
+    hist.max_entries = opts.max_history;
+    try std.testing.expectEqual(@as(usize, 42), hist.max_entries);
+
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        var buf: [8]u8 = undefined;
+        const line = try std.fmt.bufPrint(&buf, "cmd{d}", .{i});
+        try hist.append(line);
+    }
+    // Cap is enforced on append: only the most recent 42 are retained.
+    try std.testing.expectEqual(@as(usize, 42), hist.entries.items.len);
+}
+
+test "QF-091: undo restores pre-paste buffer after flushPasteBuffer" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+
+    try state.buffer.appendSlice(allocator, "pre");
+    state.cursor = 3;
+
+    var paste_buf: [PASTE_BUF_SIZE]u8 = undefined;
+    const content = "pasted";
+    @memcpy(paste_buf[0..content.len], content);
+    var paste_len: usize = content.len;
+    var last_action: KeyAction = .none;
+    flushPasteBuffer(&state, &paste_buf, &paste_len, &last_action);
+    try std.testing.expectEqualStrings("prepasted", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.undo_stack.len());
+
+    // Undo restores the pre-paste buffer and cursor.
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("pre", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 3), state.cursor);
+}
+
+test "QF-091: vi dw is undoable" {
+    const allocator = std.testing.allocator;
+    var hist = try history_mod.HistoryStore.init(allocator, null, false);
+    defer hist.deinit();
+    var state = createTestState(allocator, &hist);
+    defer state.deinit();
+    state.keymap = .vi;
+    state.vi_mode = .normal;
+    var paste_state = PasteState{};
+
+    try state.buffer.appendSlice(allocator, "hello world");
+    state.cursor = 0;
+
+    // Drive "dw" through the real per-key snapshot path: 'd' arms the pending
+    // operator, 'w' executes the delete-word (a direct in-handler mutation
+    // returning .none).
+    var last_action: KeyAction = .none;
+    try processReadBuffer(&state, &paste_state, "dw", &last_action);
+    try std.testing.expectEqualStrings("world", state.buffer.items);
+    try std.testing.expectEqual(@as(usize, 1), state.undo_stack.len());
+
+    // The vi operator mutation must be undoable (was silently dropped before).
+    try processAction(&state, .undo);
+    try std.testing.expectEqualStrings("hello world", state.buffer.items);
 }
 
 test "keyMayMutate: classifies common keys correctly (emacs)" {
