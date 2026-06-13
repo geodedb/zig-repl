@@ -6,29 +6,33 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 
 ### Prerequisites
 
-- [Zig](https://ziglang.org/download/) 0.15.0 or later
+- [Zig](https://ziglang.org/download/) 0.16.0 or later
 - Git
 - A terminal emulator for testing
 
 ### Development Setup
 
 1. Clone the repository:
+
    ```bash
    git clone https://gitlab.com/devnw/zig/repl.git
    cd repl
    ```
 
 2. Build the project:
+
    ```bash
    zig build
    ```
 
 3. Run tests:
+
    ```bash
    zig build test
    ```
 
 4. Run the example:
+
    ```bash
    zig build run
    ```
@@ -60,9 +64,11 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 
 1. Check existing [issues](https://gitlab.com/devnw/zig/repl/-/issues) for related work
 2. Create a new branch from `main`:
+
    ```bash
    git checkout -b feature/my-feature
    ```
+
 3. Make your changes
 4. Write or update tests
 5. Run the test suite
@@ -73,7 +79,7 @@ Thank you for your interest in contributing to the Zig REPL Library! This docume
 
 Use clear, descriptive commit messages:
 
-```
+```text
 feat: add transpose character command
 
 - Implement Ctrl+T for Emacs mode
@@ -84,6 +90,7 @@ Closes #7
 ```
 
 Prefix commits with:
+
 - `feat:` - New features
 - `fix:` - Bug fixes
 - `docs:` - Documentation changes
@@ -109,7 +116,7 @@ Prefix commits with:
 
 ## Project Structure
 
-```
+```text
 repl/
 ├── src/
 │   ├── core.zig         # Main REPL implementation

@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-12
+
+### Fixed
+- Harden config/history file permissions: implement a real `compat.chmod`
+  (POSIX `setPermissions`), create config files via atomic temp-file +
+  `0o600`, and re-tighten pre-existing history files on open (NEW-001/002/005)
+- Persist bracketed-paste state across `read()` boundaries so markers torn
+  across reads are reassembled; add a read-span safety bound (ADV-001)
+- Restore the OpenTelemetry seam so `-Dwith_otel=true` is functional again,
+  reverting the hardcoded `enabled=false` workaround (NEW-006)
+- Harden `sync_diamond_deps.py --cascade --apply`: repo allowlist, interactive
+  confirmation token, and tag-signature/commit verification before push (#124)
+
+### Changed
+- Single-source the version from `build.zig.zon` (derive `repl.version*`
+  constants at build time) so the manifest is the only source of truth
+- Pin the CI Docker base image by digest (`debian:bookworm-slim@sha256:…`)
+- Lazy undo snapshots: pure cursor moves no longer dup/free the buffer
+
+## [0.1.8] - 2026-06-02
+
+### Changed
+- Converge `tls` dependency onto v0.1.9 via diamond-dependency sync
+
+## [0.1.7] - 2026-05-31
+
+### Changed
+- Converge dependency-graph pins across sibling packages
+
+## [0.1.6] - 2026-05-02
+
+### Changed
+- Converge sibling dependency pins
+
+## [0.1.5] - 2026-05-02
+
+### Fixed
+- Hardcode observability `enabled=false` to work around a Zig 0.16
+  `build_options` module-deduplication error (later restored in 0.1.9)
+
+## [0.1.4] - 2026-05-02
+
+### Changed
+- Release bump with tagged sibling dependencies
+
+## [0.1.3] - 2026-05-02
+
+### Changed
+- Release bump with tagged sibling dependencies
+
+## [0.1.2] - 2026-05-02
+
+### Added
+- OpenTelemetry observability seam gated behind `-Dwith_otel` (no-op when
+  disabled), with init helper and enabled-mode eval-span smoke test
+- Diamond-dependency detector and pre-commit hook
+
+### Changed
+- Migrate to Zig 0.16.0 (`src/compat.zig` std.Io compatibility shim); update
+  README and `build.zig.zon` minimum version to 0.16.0
+- Pin CI Zig 0.16.0 toolchain by SHA-256; standardize `.pre-commit-config.yaml`
+
+### Fixed
+- Close 21 audit findings across three cycles: bounds checks, persistent
+  history handle, reverse-search ESC handling, dangling-pointer fix,
+  arena allocator, SIGWINCH handling, single-pass render, and O(n) dedup
+
 ## [0.1.1] - 2026-01-26
 
 ### Changed
@@ -77,6 +144,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Company runners with Alpine Linux support
 - Code coverage support via CI catalog v1.6.0
 
-[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.1...HEAD
+[Unreleased]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.9...HEAD
+[0.1.9]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.8...v0.1.9
+[0.1.8]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.7...v0.1.8
+[0.1.7]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.6...v0.1.7
+[0.1.6]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.5...v0.1.6
+[0.1.5]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.4...v0.1.5
+[0.1.4]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.3...v0.1.4
+[0.1.3]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.2...v0.1.3
+[0.1.2]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.1...v0.1.2
 [0.1.1]: https://gitlab.com/devnw/zig/repl/-/compare/v0.1.0...v0.1.1
 [0.1.0]: https://gitlab.com/devnw/zig/repl/-/releases/v0.1.0
