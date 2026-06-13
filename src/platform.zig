@@ -233,10 +233,19 @@ pub fn enterRawMode() !TerminalState {
     raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout for escape sequences
 
     try std.posix.tcsetattr(stdin.handle, .FLUSH, raw);
+    // ADV-002 (#147): if anything after this point fails, restore cooked mode
+    // before propagating -- the caller's `defer restoreTerminalMode` is not
+    // registered until enterRawMode returns, so without this errdefer a
+    // failed bracketed-paste enable would leave the terminal stuck in raw mode.
+    errdefer std.posix.tcsetattr(stdin.handle, .FLUSH, original) catch {};
 
     // Save original state for signal handler restoration and install handlers.
     saved_termios = original;
     installTerminalSignalHandlers();
+    errdefer {
+        removeTerminalSignalHandlers();
+        saved_termios = null;
+    }
 
     // Enable bracketed paste mode
     const stdout = getStdoutHandle();
