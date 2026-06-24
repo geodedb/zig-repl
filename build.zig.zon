@@ -1,6 +1,6 @@
 .{
     .name = .repl,
-    .version = "0.1.12",
+    .version = "0.1.13",
     .fingerprint = 0xc555ea454f750183,
     .minimum_zig_version = "0.16.0",
     .paths = .{
@@ -18,8 +18,8 @@
         // produced artifact contains zero otel symbols (verified by
         // otel/scripts/verify-consumer-noop.sh).
         .otel = .{
-            .url = "git+https://gitlab.com/devnw/zig/otel.git#v0.1.15",
-            .hash = "otel-0.1.15-B0v3lrz2NQDlzY3t-QLNpP4PE3UylgFDF__MoZZTWNJt",
+            .url = "git+https://gitlab.com/devnw/zig/otel.git#v0.1.16",
+            .hash = "otel-0.1.16-B0v3lrz2NQC0EFK30-AxgOnqY6nk34zAtax1JZbZ6YFS",
             .lazy = true,
         },
     },
