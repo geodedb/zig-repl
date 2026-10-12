@@ -219,3 +219,16 @@ hook-env-regression:
     - apt-get update -qq && apt-get install -y --no-install-recommends git
   script:
     - python3 scripts/test_hook_env.py
+
+# SONNY-4848: verify the filtered package contains all declared build inputs.
+test-source-package:
+  stage: test
+  image: $DEBIAN_IMAGE
+  before_script:
+    - *install-zig
+    - apt-get update -qq && apt-get install -y --no-install-recommends git python3
+  script:
+    - python3 scripts/check_source_package.py --jobs 2
+  needs:
+    - build
+  allow_failure: false
