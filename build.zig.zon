@@ -18,8 +18,8 @@
         // produced artifact contains zero otel symbols (verified by
         // otel/scripts/verify-consumer-noop.sh).
         .otel = .{
-            .url = "git+https://gitlab.com/devnw/zig/otel.git?ref=v0.1.24#2e5e5e4609c8f452c75846c91a59de76417e85f4",
-            .hash = "otel-0.1.24-B0v3liX3NQBKK7oqRuCRfgu0FIwR6nNQOGpIjs8YoCrY",
+            .url = "git+https://gitlab.com/devnw/zig/otel.git?ref=v0.1.25#271cdfbfde389767886c6ba3656e584b80d54979",
+            .hash = "otel-0.1.25-B0v3lir4NQD1YLvBQTNUl4C63ehXde1RR_aRyO-bbzlY",
             .lazy = true,
         },
     },
