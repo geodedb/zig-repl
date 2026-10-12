@@ -223,7 +223,7 @@ hook-env-regression:
 # SONNY-4848: verify the filtered package contains all declared build inputs.
 test-source-package:
   stage: test
-  image: $DEBIAN_IMAGE
+  image: debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
   before_script:
     - *install-zig
     - apt-get update -qq && apt-get install -y --no-install-recommends git python3
