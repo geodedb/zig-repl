@@ -227,6 +227,8 @@ test "chmod re-tightens an existing file's mode (POSIX)" {
             .permissions = @enumFromInt(0o644),
         });
         defer file.close(io);
+        // File creation honors umask; establish the intended old-file fixture.
+        try file.setPermissions(io, @enumFromInt(0o644));
     }
 
     // Sanity-check it started looser than the target.

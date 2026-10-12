@@ -500,7 +500,9 @@ test "history append re-tightens pre-existing 0o644 file to 0o600" {
             .truncate = true,
             .permissions = @enumFromInt(0o644),
         });
-        file.close(io);
+        defer file.close(io);
+        // File creation honors umask; establish the intended old-file fixture.
+        try file.setPermissions(io, @enumFromInt(0o644));
     }
 
     // Confirm it started looser than the target.
@@ -536,8 +538,13 @@ test "history clear re-tightens pre-existing 0o644 file to 0o600" {
             .truncate = true,
             .permissions = @enumFromInt(0o644),
         });
-        file.close(io);
+        defer file.close(io);
+        // File creation honors umask; establish the intended old-file fixture.
+        try file.setPermissions(io, @enumFromInt(0o644));
     }
+
+    const stat_before = try std.Io.Dir.cwd().statFile(io, path, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o644), stat_before.permissions.toMode() & 0o777);
 
     // Clearing should truncate AND re-tighten the pre-existing file.
     {
