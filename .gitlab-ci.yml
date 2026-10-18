@@ -108,6 +108,11 @@ stages:
       mv "${ARCHIVE_NAME}" "zig-${ZIG_VERSION}"
       rm -f "${TARBALL}"
     fi
+  # Zig fetches dependencies over HTTPS and needs the system CA bundle. When the
+  # Zig toolchain comes from the cache the download branch above is skipped, so
+  # debian:bookworm-slim would have no CA certificates and every dependency fetch
+  # fails with TlsInitializationFailed.
+  - test -s /etc/ssl/certs/ca-certificates.crt || { apt-get update && apt-get install -y --no-install-recommends ca-certificates; }
   - export PATH="$PWD/zig-${ZIG_VERSION}:$PATH"
   - zig version
 
